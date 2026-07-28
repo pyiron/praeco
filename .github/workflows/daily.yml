@@ -10,3 +10,6 @@ jobs:
   codeql:
     uses: pyiron/actions/.github/workflows/tests-and-coverage.yml@actions-4.1.0
     secrets: inherit
+    with:
+      do-coveralls: false
+      do-codecov: true
