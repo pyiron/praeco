@@ -3,6 +3,7 @@ from datetime import date
 
 from pydantic import ValidationError as PydanticValidationError
 
+from praeco import Organization
 from praeco.metadata import (
     Contributor,
     Person,
@@ -12,6 +13,37 @@ from praeco.metadata import (
 
 
 class TestPublicationMetadata(unittest.TestCase):
+    def test_organization_normalizes_name_and_optional_identifier(self):
+        for identifier, expected in ((None, None), ("   ", None), (" lab-1 ", "lab-1")):
+            with self.subTest(identifier=identifier):
+                organization = Organization(
+                    name=" Materials Lab ", identifier=identifier
+                )
+                self.assertEqual(organization.name, "Materials Lab")
+                self.assertEqual(organization.identifier, expected)
+
+    def test_organization_requires_non_blank_name_on_creation_and_assignment(self):
+        for name in ("", "   "):
+            with self.subTest(name=name):
+                with self.assertRaises(PydanticValidationError):
+                    Organization(name=name)
+                organization = Organization(name="Materials Lab")
+                with self.assertRaises(PydanticValidationError):
+                    organization.name = name
+
+    def test_publication_metadata_preserves_mixed_creator_types(self):
+        person = Person(name="Doe, Jane", orcid="0000-0000-0000-0000")
+        organization = Organization(name="Materials Lab", identifier="lab-1")
+        metadata = PublicationMetadata(
+            title="Dataset",
+            description="Measurements.",
+            creators=[person, organization],
+        )
+
+        self.assertEqual(metadata.creators, (person, organization))
+        self.assertIsInstance(metadata.creators[0], Person)
+        self.assertIsInstance(metadata.creators[1], Organization)
+
     def test_publication_metadata_accepts_reusable_fields(self):
         metadata = PublicationMetadata(
             title=" praeco ",

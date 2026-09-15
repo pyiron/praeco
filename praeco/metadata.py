@@ -18,6 +18,7 @@ _MODEL_CONFIG = ConfigDict(validate_assignment=True)
 
 __all__ = [
     "Contributor",
+    "Organization",
     "Person",
     "PublicationMetadata",
     "RelatedIdentifier",
@@ -58,6 +59,24 @@ class Person:
 
 
 @dataclass(config=_MODEL_CONFIG)
+class Organization:
+    """Organization identity used as a publication creator."""
+
+    name: str
+    identifier: str | None = None
+
+    @field_validator("name", mode="after")
+    @classmethod
+    def _clean_name(cls, value: str) -> str:
+        return _required_text(value)
+
+    @field_validator("identifier", mode="after")
+    @classmethod
+    def _clean_identifier(cls, value: str | None) -> str | None:
+        return _optional_text(value)
+
+
+@dataclass(config=_MODEL_CONFIG)
 class Contributor:
     """Publication contributor with an optional service-neutral role."""
 
@@ -95,7 +114,7 @@ class PublicationMetadata:
 
     title: str
     description: str
-    creators: tuple[Person, ...]
+    creators: tuple[Person | Organization, ...]
     publication_date: date | None = None
     contributors: tuple[Contributor, ...] = field(default_factory=tuple)
     keywords: tuple[str, ...] = field(default_factory=tuple)
@@ -130,7 +149,7 @@ class PublicationMetadata:
     def _validate_creators(self) -> Self:
         if self.creators:
             return self
-        raise ValueError("creators must contain at least one person")
+        raise ValueError("creators must contain at least one creator")
 
 
 def _required_text(value: str) -> str:
