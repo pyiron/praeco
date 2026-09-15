@@ -58,7 +58,7 @@ class Person:
         )
 
 
-@dataclass(config=_MODEL_CONFIG)
+@dataclass(config=ConfigDict(validate_assignment=True, extra="forbid"))
 class Organization:
     """Organization identity used as a publication creator."""
 
