@@ -46,6 +46,29 @@ def _valid_publication_metadata(**overrides):
 
 
 class TestZenodoMetadata(unittest.TestCase):
+    def test_serializes_mixed_person_and_organization_creators(self):
+        metadata = _valid_publication_metadata(
+            creators=[
+                common_metadata.Person(
+                    family_name="Doe",
+                    given_names="Jane",
+                    orcid="0000",
+                    affiliation="Lab",
+                ),
+                common_metadata.Organization(name="Materials Lab", identifier="lab-1"),
+            ]
+        )
+
+        payload = ZenodoMetadata.dataset(metadata).to_payload()
+
+        self.assertEqual(
+            payload["metadata"]["creators"],
+            [
+                {"name": "Doe, Jane", "orcid": "0000", "affiliation": "Lab"},
+                {"name": "Materials Lab"},
+            ],
+        )
+
     def setUp(self):
         self._warning_context = warnings.catch_warnings()
         self._warning_context.__enter__()
