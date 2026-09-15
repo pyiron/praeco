@@ -11,7 +11,13 @@ from datetime import date, datetime
 from typing import Any
 
 from praeco.exceptions import ValidationError
-from praeco.metadata import Contributor, Person, PublicationMetadata, RelatedIdentifier
+from praeco.metadata import (
+    Contributor,
+    Organization,
+    Person,
+    PublicationMetadata,
+    RelatedIdentifier,
+)
 
 _CONTACT_FIELDS = frozenset({"uri", "name", "email", "identifier", "url"})
 _PUBLISHER_FIELDS = frozenset(_CONTACT_FIELDS | {"type"})
@@ -116,7 +122,7 @@ class DataportalMetadata:
         _add_if_present(payload, "version", self.metadata.version)
         _add_if_present(payload, "type", self.dataset_type)
         payload["creator"] = [
-            _dataportal_agent(person) for person in self.metadata.creators
+            _dataportal_agent(creator) for creator in self.metadata.creators
         ]
         if self.metadata.publication_date is not None:
             payload["issued"] = self.metadata.publication_date.isoformat()
@@ -183,7 +189,7 @@ class DataportalMetadata:
             extras["language"] = self.metadata.language
 
         extras["creators"] = _json_value(
-            [_person_dict(person) for person in self.metadata.creators]
+            [_creator_dict(creator) for creator in self.metadata.creators]
         )
         if self.metadata.contributors:
             extras["contributors"] = _json_value(
@@ -215,13 +221,17 @@ def _generated_extra_keys(metadata: PublicationMetadata) -> set[str]:
     return keys
 
 
-def _dataportal_agent(person: Person) -> dict[str, str]:
-    """Serialize a person into the Dataportal agent field shape."""
+def _dataportal_agent(creator: Person | Organization) -> dict[str, str]:
+    """Serialize a neutral creator into the Dataportal agent field shape."""
+    if isinstance(creator, Organization):
+        data = {"name": creator.name, "type": "Organization"}
+        _add_if_present(data, "identifier", creator.identifier)
+        return data
     data = {
-        "name": _person_name(person),
+        "name": _person_name(creator),
         "type": "Person",
     }
-    _add_if_present(data, "identifier", _orcid_uri(person.orcid))
+    _add_if_present(data, "identifier", _orcid_uri(creator.orcid))
     return data
 
 
@@ -259,6 +269,12 @@ def _person_dict(person: Person) -> dict[str, str]:
     _add_if_present(data, "orcid", person.orcid)
     _add_if_present(data, "gnd", person.gnd)
     return data
+
+
+def _creator_dict(creator: Person | Organization) -> dict[str, str]:
+    if isinstance(creator, Organization):
+        return _dataportal_agent(creator)
+    return _person_dict(creator)
 
 
 def _contributor_dict(contributor: Contributor) -> dict[str, Any]:
