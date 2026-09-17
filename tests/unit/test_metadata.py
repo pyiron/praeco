@@ -15,13 +15,12 @@ from praeco.metadata import (
 class TestPublicationMetadata(unittest.TestCase):
     def test_invalid_person_mapping_cannot_fall_back_to_organization(self):
         for field in ("orcid", "gnd", "affiliation", "family_name", "given_names"):
-            with self.subTest(field=field):
-                with self.assertRaises(PydanticValidationError):
-                    PublicationMetadata(
-                        title="Dataset",
-                        description="Measurements.",
-                        creators=[{"name": "Jane Doe", field: 123}],
-                    )
+            with self.subTest(field=field), self.assertRaises(PydanticValidationError):
+                PublicationMetadata(
+                    title="Dataset",
+                    description="Measurements.",
+                    creators=[{"name": "Jane Doe", field: 123}],
+                )
 
     def test_organization_normalizes_name_and_optional_identifier(self):
         for identifier, expected in ((None, None), ("   ", None), (" lab-1 ", "lab-1")):
