@@ -184,7 +184,7 @@ class ZenodoMetadata:
             if isinstance(creator, Creator):
                 creator.validate()
             else:
-                _ = _person_api_name(creator)
+                _ = _creator_api_name(creator)
 
         if upload_type == "publication":
             _ = _required_string(self.publication_type, "publication_type")
@@ -371,7 +371,12 @@ class ZenodoMetadata:
             return self.description
         return self.metadata.description
 
-    def _creators(self) -> tuple[common_metadata.Person, ...] | list[Creator]:
+    def _creators(
+        self,
+    ) -> (
+        tuple[common_metadata.Person | common_metadata.Organization, ...]
+        | list[Creator]
+    ):
         if self.metadata is None:
             return self.creators
         return self.metadata.creators
@@ -466,10 +471,12 @@ def _warn_legacy_common_metadata(*, stacklevel: int) -> None:
 
 
 def _creator_to_api_dict(
-    creator: Creator | common_metadata.Person,
+    creator: Creator | common_metadata.Person | common_metadata.Organization,
 ) -> dict[str, str]:
     if isinstance(creator, Creator):
         return creator.to_api_dict()
+    if isinstance(creator, common_metadata.Organization):
+        return {"name": creator.name}
     data = {"name": _person_api_name(creator)}
     _add_if_present(data, "affiliation", creator.affiliation)
     _add_if_present(data, "orcid", creator.orcid)
@@ -485,6 +492,14 @@ def _person_api_name(person: common_metadata.Person) -> str:
     raise ValidationError(
         "person requires either name or both family_name and given_names"
     )
+
+
+def _creator_api_name(
+    creator: common_metadata.Person | common_metadata.Organization,
+) -> str:
+    if isinstance(creator, common_metadata.Organization):
+        return creator.name
+    return _person_api_name(creator)
 
 
 def _related_identifier_to_api_dict(

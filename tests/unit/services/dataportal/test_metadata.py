@@ -6,6 +6,7 @@ from typing import Any, cast
 from praeco.exceptions import ValidationError
 from praeco.metadata import (
     Contributor,
+    Organization,
     Person,
     PublicationMetadata,
     RelatedIdentifier,
@@ -55,6 +56,39 @@ def extras_by_key(payload: dict[str, Any]) -> dict[str, str]:
 
 
 class TestDataportalMetadata(unittest.TestCase):
+    def test_serializes_mixed_person_and_organization_creators(self):
+        for identifier in (None, "lab-1"):
+            with self.subTest(identifier=identifier):
+                metadata = publication_metadata(
+                    creators=[
+                        Person(name="Doe, Jane", orcid="0000", affiliation="Lab"),
+                        Organization(name="Materials Lab", identifier=identifier),
+                    ]
+                )
+                payload = DataportalMetadata(metadata=metadata).to_payload()
+                organization = {"name": "Materials Lab", "type": "Organization"}
+                if identifier is not None:
+                    organization["identifier"] = identifier
+
+                self.assertEqual(
+                    payload["creator"],
+                    [
+                        {
+                            "name": "Doe, Jane",
+                            "type": "Person",
+                            "identifier": "https://orcid.org/0000",
+                        },
+                        organization,
+                    ],
+                )
+                self.assertEqual(
+                    json.loads(extras_by_key(payload)["creators"]),
+                    [
+                        {"name": "Doe, Jane", "orcid": "0000", "affiliation": "Lab"},
+                        organization,
+                    ],
+                )
+
     def test_serializes_publication_and_dataportal_fields(self):
         metadata = DataportalMetadata(
             metadata=publication_metadata(),
