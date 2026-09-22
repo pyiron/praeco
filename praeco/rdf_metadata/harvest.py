@@ -33,6 +33,7 @@ from praeco.rdf_metadata.models import (
     OptionalField,
     SourceInfo,
     SubjectRecord,
+    Suggestion,
 )
 from praeco.rdf_metadata.source import LoadedSource, load_source
 
@@ -117,6 +118,18 @@ class RdfMetadataHarvest:
         if self.subject is not None:
             diagnostics = []
             for review in self._reviews:
+                for evidence in review.observations:
+                    if evidence.rule == "unmapped_identifier":
+                        diagnostics.append(
+                            Diagnostic(
+                                "unmapped_identifier",
+                                "doi",
+                                self.subject.term,
+                                "Identifier is retained for review but is not a recognized DOI.",
+                                False,
+                                (evidence,),
+                            )
+                        )
                 if review.status == "unresolved" or (
                     review.field in ("title", "description")
                     and review.status == "missing"
@@ -276,6 +289,35 @@ class RdfMetadataHarvest:
                 selection=candidate,
                 status="resolved",
                 origin="selection",
+            )
+        )
+
+    def accept_suggestion(self, suggestion: Suggestion[str] | Suggestion[date]) -> Self:
+        """Accept an inference locally; conversion publishes its reviewed value."""
+        subject = self._require_subject()
+        if (
+            not isinstance(suggestion, Suggestion)
+            or suggestion.field
+            in ("creators", "contributors", "keywords", "related_identifiers")
+            or suggestion.field not in FIELD_NAMES
+        ):
+            raise ValidationError("accept an available scalar suggestion")
+        review = self._raw_field(suggestion.field)
+        if (
+            suggestion._context is not self._source.token
+            or suggestion._subject != subject.term
+            or not any(suggestion is item for item in review.suggestions)
+        ):
+            raise ValidationError(
+                "suggestion does not belong to this source and subject"
+            )
+        return self._replace_field(
+            replace(
+                review,
+                value=suggestion.value,
+                selection=suggestion,
+                status="resolved",
+                origin="acceptance",
             )
         )
 
