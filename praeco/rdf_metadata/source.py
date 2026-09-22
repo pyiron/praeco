@@ -77,7 +77,7 @@ def load_source(source: Graph | str | bytes | Path) -> LoadedSource:
         sha256=None if raw is None else hashlib.sha256(raw).hexdigest(),
     )
     token = object()
-    records = []
+    records: list[SubjectRecord] = []
     for term in sorted(set(graph.subjects()), key=lambda node: node.n3()):
         triples = sorted(
             graph.triples((term, None, None)), key=lambda t: tuple(n.n3() for n in t)

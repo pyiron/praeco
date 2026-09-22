@@ -116,7 +116,7 @@ class RdfMetadataHarvest:
     @property
     def diagnostics(self) -> tuple[Diagnostic, ...]:
         if self.subject is not None:
-            diagnostics = []
+            diagnostics: list[Diagnostic] = []
             for review in self._reviews:
                 for evidence in review.observations:
                     if evidence.rule == "unmapped_identifier":

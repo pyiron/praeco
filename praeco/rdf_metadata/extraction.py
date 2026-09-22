@@ -120,7 +120,7 @@ def _scalar_field(
     ignore_invalid: bool = False,
 ) -> FieldReview[_VALUE]:
     """Group normalized values without discarding languages or duplicate support."""
-    observed = []
+    observed: list[Evidence] = []
     groups: dict[_VALUE, list[tuple[_Term, Evidence]]] = {}
     invalid = False
     for predicate in predicates:
@@ -136,9 +136,9 @@ def _scalar_field(
                 groups.setdefault(value, []).append((term, evidence))
             else:
                 invalid = not ignore_invalid
-    ranked = []
+    ranked: list[tuple[Candidate[_VALUE], int]] = []
     for value, support in sorted(groups.items()):
-        ranks = []
+        ranks: list[int] = []
         for literal, _ in support:
             lang = (
                 literal.language.lower()
@@ -279,7 +279,7 @@ def extract_creators(
             links.setdefault(term, []).append(
                 Evidence(rule, ((subject.n3(), predicate.n3(), term.n3()),))
             )
-    observations = []
+    observations: list[CreatorObservation] = []
     creators: list[Person | Organization] = []
     direct = 0
     for term, support in sorted(links.items(), key=lambda item: item[0].n3()):
