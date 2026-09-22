@@ -6,6 +6,7 @@ from praeco.rdf_metadata.harvest import (
 )
 from praeco.rdf_metadata.models import (
     Candidate,
+    CreatorObservation,
     CreatorReview,
     Diagnostic,
     Evidence,

@@ -123,12 +123,32 @@ class FieldReview(Generic[T]):
 
 
 @dataclass(frozen=True)
+class CreatorObservation:
+    """An RDF agent, including incomplete identities and attribution-only links."""
+
+    term: URIRef | BNode | RdfLiteral
+    kind: Literal["person", "organization", "software", "unknown", "conflicting"]
+    types: tuple[URIRef, ...]
+    name: str | None
+    name_candidates: tuple[Candidate[str], ...]
+    identifier: str | None
+    orcid: str | None
+    relations: tuple[Literal["creator", "attribution"], ...]
+    evidence: tuple[Evidence, ...]
+
+    @property
+    def _complete(self) -> bool:
+        return self.kind in ("person", "organization") and self.name is not None
+
+
+@dataclass(frozen=True)
 class CreatorReview:
     """Reviewed creators; mutable neutral values are copied on public access."""
 
     value: tuple[Person | Organization, ...] = ()
     status: Status = "missing"
     origin: Origin | None = None
+    observations: tuple[CreatorObservation, ...] = ()
 
 
 @dataclass(frozen=True)

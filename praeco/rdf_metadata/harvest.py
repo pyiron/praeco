@@ -19,7 +19,7 @@ from praeco.metadata import (
     PublicationMetadata,
     RelatedIdentifier,
 )
-from praeco.rdf_metadata.extraction import extract_fields
+from praeco.rdf_metadata.extraction import extract_creators, extract_fields
 from praeco.rdf_metadata.models import (
     FIELD_NAMES,
     OPTIONAL_FIELDS,
@@ -135,7 +135,7 @@ class RdfMetadataHarvest:
                             review.observations,
                         )
                     )
-            if self._creators.status != "resolved":
+            if self._creators.status == "missing":
                 diagnostics.append(
                     Diagnostic(
                         "missing_required",
@@ -145,6 +145,33 @@ class RdfMetadataHarvest:
                         True,
                     )
                 )
+            for observation in self._creators.observations:
+                if (
+                    "creator" in observation.relations
+                    and not observation._complete
+                    and self._creators.status == "unresolved"
+                ):
+                    diagnostics.append(
+                        Diagnostic(
+                            "unresolved_creator",
+                            "creators",
+                            self.subject.term,
+                            f"Creator {observation.term.n3()} has unresolved kind or name.",
+                            True,
+                            observation.evidence,
+                        )
+                    )
+                if observation.relations == ("attribution",):
+                    diagnostics.append(
+                        Diagnostic(
+                            "attribution_requires_review",
+                            "creators",
+                            self.subject.term,
+                            f"Attribution to {observation.term.n3()} does not establish authorship.",
+                            False,
+                            observation.evidence,
+                        )
+                    )
             return tuple(diagnostics)
         if self._requested_subject is not None:
             return (
@@ -184,6 +211,7 @@ class RdfMetadataHarvest:
             return self
         record = next((item for item in self.subjects if item.term == term), None)
         reviews = self._reviews
+        creators = self._creators
         if record is not None:
             extracted = extract_fields(
                 self._source.graph,
@@ -195,11 +223,18 @@ class RdfMetadataHarvest:
                 next((item for item in extracted if item.field == review.field), review)
                 for review in reviews
             )
+            creators = extract_creators(
+                self._source.graph,
+                record.term,
+                self._preferred_languages,
+                self._source.token,
+            )
         return replace(
             self,
             subject=record,
             _requested_subject=URIRef(term) if record is None else None,
             _reviews=reviews,
+            _creators=creators,
         )
 
     def _require_subject(self) -> SubjectRecord:
