@@ -7,13 +7,53 @@ from pathlib import Path
 from unittest.mock import patch
 
 import rdflib
-from rdflib import XSD, BNode, Graph, Literal, URIRef
+from rdflib import XSD, BNode, Dataset, Graph, Literal, URIRef
 
 from praeco.exceptions import ValidationError
 from praeco.rdf_metadata import harvest_publication_metadata_from_rdf as harvest
 
 
 class TestLocalSources(unittest.TestCase):
+    def test_dataset_containers_require_explicit_graph_selection(self):
+        for location in ("empty", "default", "named"):
+            with self.subTest(location=location):
+                dataset = Dataset()
+                if location != "empty":
+                    graph = (
+                        dataset.default_graph
+                        if location == "default"
+                        else dataset.graph(URIRef("urn:graph"))
+                    )
+                    graph.add((URIRef("urn:s"), URIRef("urn:p"), Literal("value")))
+                before = set(dataset.quads())
+                with self.assertRaisesRegex(
+                    ValidationError, "Dataset input requires an explicit graph"
+                ) as caught:
+                    harvest(dataset)
+                self.assertIn("dataset.default_graph", str(caught.exception))
+                self.assertIn("dataset.graph(identifier)", str(caught.exception))
+                self.assertEqual(set(dataset.quads()), before)
+
+    def test_explicit_dataset_graphs_are_snapshotted_independently(self):
+        dataset = Dataset()
+        named = dataset.graph(URIRef("urn:graph"))
+        subject, predicate = URIRef("urn:s"), URIRef("http://purl.org/dc/terms/title")
+        dataset.default_graph.add((subject, predicate, Literal("Default title")))
+        named.add((subject, predicate, Literal("Named title")))
+        before = set(dataset.quads())
+        for graph, title in (
+            (dataset.default_graph, "Default title"),
+            (named, "Named title"),
+        ):
+            with self.subTest(title=title):
+                result = harvest(graph, subject=subject)
+                self.assertEqual(result.title.value, title)
+                self.assertEqual(result.source.triple_count, 1)
+                self.assertEqual(len(result.title.candidates), 1)
+                self.assertEqual(set(dataset.quads()), before)
+        named.remove((None, None, None))
+        self.assertEqual(result.title.value, "Named title")
+
     def test_typed_literal_spellings_survive_parsing_and_candidate_grouping(self):
         text = """@prefix dct: <http://purl.org/dc/terms/> .
             @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .

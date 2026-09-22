@@ -8,7 +8,19 @@ from pathlib import Path
 from typing import Literal as TypeLiteral
 from typing import cast
 
-from rdflib import DC, DCTERMS, FOAF, RDF, RDFS, SKOS, BNode, Graph, Literal, URIRef
+from rdflib import (
+    DC,
+    DCTERMS,
+    FOAF,
+    RDF,
+    RDFS,
+    SKOS,
+    BNode,
+    Dataset,
+    Graph,
+    Literal,
+    URIRef,
+)
 from rdflib.plugins.parsers.notation3 import RDFSink, SinkParser
 
 from praeco.exceptions import ValidationError
@@ -55,7 +67,13 @@ def load_source(source: Graph | str | bytes | Path) -> LoadedSource:
 
     A supplied Graph retains its existing terms; lexical information already
     lost during the caller's parsing cannot be recovered.
+    Dataset containers require the caller to select an individual graph.
     """
+    if isinstance(source, Dataset):
+        raise ValidationError(
+            "Dataset input requires an explicit graph; pass "
+            "dataset.default_graph or dataset.graph(identifier)"
+        )
     raw: bytes | None = None
     kind: TypeLiteral["graph", "text", "bytes", "path"]
     if isinstance(source, Graph):
