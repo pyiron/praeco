@@ -2,16 +2,95 @@ import hashlib
 import tempfile
 import unittest
 from dataclasses import FrozenInstanceError
+from datetime import date
 from pathlib import Path
 from unittest.mock import patch
 
-from rdflib import BNode, Graph, Literal, URIRef
+import rdflib
+from rdflib import XSD, BNode, Graph, Literal, URIRef
 
 from praeco.exceptions import ValidationError
 from praeco.rdf_metadata import harvest_publication_metadata_from_rdf as harvest
 
 
 class TestLocalSources(unittest.TestCase):
+    def test_typed_literal_spellings_survive_parsing_and_candidate_grouping(self):
+        text = """@prefix dct: <http://purl.org/dc/terms/> .
+            @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+            <urn:s> dct:issued "2021-02-03Z"^^xsd:date, "2021-02-03+02:00"^^xsd:date;
+                dct:created "2020-01-01T00:00:00Z"^^xsd:dateTime,
+                    "2020-01-01T00:00:00+00:00"^^xsd:dateTime;
+                dct:title "01"^^xsd:integer, "1"^^xsd:integer;
+                dct:description "Description"; dct:creator "Jane" ."""
+        normalization = rdflib.NORMALIZE_LITERALS
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "data.ttl"
+            path.write_bytes(text.encode())
+            for source in (text, text.encode(), path):
+                with self.subTest(kind=type(source).__name__):
+                    result = harvest(source, subject="urn:s")
+                    self.assertEqual(result.source.triple_count, 8)
+                    self.assertEqual(len(result.publication_date.candidates), 1)
+                    candidate = result.publication_date.candidates[0]
+                    self.assertEqual(candidate.value, date(2021, 2, 3))
+                    self.assertEqual(
+                        {e.triples[0][2] for e in candidate.evidence},
+                        {
+                            f'"{value}"^^<{XSD.date}>'
+                            for value in ("2021-02-03Z", "2021-02-03+02:00")
+                        },
+                    )
+                    suggestion = result.publication_date.suggestions[0]
+                    self.assertEqual(suggestion.value, date(2020, 1, 1))
+                    self.assertEqual(
+                        {e.triples[0][2] for e in suggestion.evidence},
+                        {
+                            f'"{value}"^^<{XSD.dateTime}>'
+                            for value in (
+                                "2020-01-01T00:00:00Z",
+                                "2020-01-01T00:00:00+00:00",
+                            )
+                        },
+                    )
+                    self.assertEqual(
+                        [c.value for c in result.title.candidates], ["01", "1"]
+                    )
+                    self.assertEqual(
+                        result.with_overrides(title="Title")
+                        .to_publication_metadata()
+                        .publication_date,
+                        date(2021, 2, 3),
+                    )
+                    self.assertEqual(rdflib.NORMALIZE_LITERALS, normalization)
+        with self.assertRaises(ValidationError):
+            harvest(text + "invalid Turtle")
+        self.assertEqual(rdflib.NORMALIZE_LITERALS, normalization)
+        # An independent RDFLib parse keeps its normal normalization behavior.
+        self.assertEqual(len(Graph().parse(data=text, format="turtle")), 5)
+
+    def test_graph_input_preserves_only_the_lexical_terms_supplied(self):
+        subject, predicate = URIRef("urn:s"), URIRef("http://purl.org/dc/terms/issued")
+        for normalize, count in ((False, 2), (True, 1)):
+            with self.subTest(normalize=normalize):
+                graph = Graph()
+                for value in ("2021-02-03Z", "2021-02-03+02:00"):
+                    graph.add(
+                        (
+                            subject,
+                            predicate,
+                            Literal(value, datatype=XSD.date, normalize=normalize),
+                        )
+                    )
+                result = harvest(graph, subject=subject)
+                self.assertEqual(result.source.triple_count, count)
+                candidate = result.publication_date.candidates[0]
+                self.assertEqual(candidate.value, date(2021, 2, 3))
+                self.assertEqual(len(candidate.evidence), count)
+                self.assertEqual(
+                    {e.triples[0][2] for e in candidate.evidence},
+                    {obj.n3() for obj in graph.objects(subject, predicate)},
+                )
+
     def test_inputs_preserve_triples_and_exact_byte_audit(self):
         text = '<urn:dataset> <http://purl.org/dc/terms/title> " Café "@fr .\n'
         raw = text.encode()

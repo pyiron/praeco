@@ -9,6 +9,7 @@ from typing import Literal as TypeLiteral
 from typing import cast
 
 from rdflib import DC, DCTERMS, FOAF, RDF, RDFS, SKOS, BNode, Graph, Literal, URIRef
+from rdflib.plugins.parsers.notation3 import RDFSink, SinkParser
 
 from praeco.exceptions import ValidationError
 from praeco.rdf_metadata.models import Evidence, SourceInfo, SubjectRecord
@@ -37,8 +38,24 @@ class LoadedSource:
     token: object = field(repr=False, compare=False)
 
 
+class _LexicalRDFSink(RDFSink):
+    """Keep typed literal spellings without changing RDFLib's global settings.
+
+    RDFLib still applies datatype-specific whitespace handling (e.g. xsd:token)
+    and parses Turtle numeric shorthand before this hook. This is not a
+    byte-for-byte Turtle representation.
+    """
+
+    def newLiteral(self, s: str, dt: URIRef | None, lang: str | None) -> Literal:
+        return Literal(s, datatype=dt, lang=lang, normalize=False)
+
+
 def load_source(source: Graph | str | bytes | Path) -> LoadedSource:
-    """Parse Turtle locally, or snapshot a caller's already parsed Graph."""
+    """Parse Turtle locally, or snapshot a caller's already parsed Graph.
+
+    A supplied Graph retains its existing terms; lexical information already
+    lost during the caller's parsing cannot be recovered.
+    """
     raw: bytes | None = None
     kind: TypeLiteral["graph", "text", "bytes", "path"]
     if isinstance(source, Graph):
@@ -65,7 +82,8 @@ def load_source(source: Graph | str | bytes | Path) -> LoadedSource:
             raise ValidationError("cannot read RDF source") from error
         graph = Graph()
         try:
-            graph.parse(data=raw, format="turtle", publicID=base)
+            parser = SinkParser(_LexicalRDFSink(graph), baseURI=base, turtle=True)
+            parser.loadBuf(raw)
         except Exception as error:
             raise ValidationError("source is not valid Turtle") from error
 
