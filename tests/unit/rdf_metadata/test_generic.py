@@ -20,6 +20,87 @@ PREFIXES = """
 
 
 class TestGenericDates(unittest.TestCase):
+    def test_malformed_typed_dates_retain_evidence_and_block_conversion(self):
+        cases = (
+            ("2020-W01-1", "date"),
+            ("2020-01-01Tgarbage", "date"),
+            ("2020-01-01+15:00", "date"),
+            ("2020-01-01-14:01", "date"),
+            ("2020-01-01+00:60", "date"),
+            ("2020-01-01z", "date"),
+            ("2021-02-29", "date"),
+            ("0000-01-01", "date"),
+            ("10000-01-01", "date"),
+            ("2020-01-01 12:00:00", "dateTime"),
+            ("2020-W01-1T12:00:00", "dateTime"),
+            ("2020-01-01T12:00", "dateTime"),
+            ("2020-01-01T12:00:00+14:01", "dateTime"),
+            ("2020-01-01T24:01:00", "dateTime"),
+            ("2020-01-01T12:60:00", "dateTime"),
+            ("2020-01-01T12:00:60", "dateTime"),
+        )
+        for value, datatype in cases:
+            with self.subTest(value=value, datatype=datatype):
+                obj = f'"{value}"^^xsd:{datatype}'
+                result = harvest(
+                    PREFIXES
+                    + f'<urn:s> dct:issued {obj}, "2022-01-01"; dct:created {obj}.',
+                    subject="urn:s",
+                )
+                self.assertEqual(result.publication_date.status, "unresolved")
+                self.assertEqual(
+                    [c.value for c in result.publication_date.candidates],
+                    [date(2022, 1, 1)],
+                )
+                self.assertEqual(result.publication_date.suggestions, ())
+                self.assertEqual(len(result.publication_date.observations), 3)
+                self.assertIn(
+                    f'"{value}"^^<{XSD[datatype]}>',
+                    [e.triples[0][2] for e in result.publication_date.observations],
+                )
+                with self.assertRaises(IncompleteHarvestError):
+                    result.to_publication_metadata()
+                self.assertIsNone(
+                    result.clear("publication_date")
+                    .to_publication_metadata()
+                    .publication_date
+                )
+
+    def test_valid_typed_dates_keep_calendar_dates_and_timezone_evidence(self):
+        for value, datatype in (
+            ("2020-02-29", "date"),
+            ("2020-02-29Z", "date"),
+            ("2020-02-29+14:00", "date"),
+            ("2020-02-29-14:00", "date"),
+            ("2020-02-29+13:59", "date"),
+            ("2020-02-29T23:59:59.123Z", "dateTime"),
+            ("2020-02-29T00:00:00-14:00", "dateTime"),
+            ("2020-02-29T23:59:59+14:00", "dateTime"),
+        ):
+            with self.subTest(value=value):
+                result = harvest(
+                    PREFIXES + f'<urn:s> dct:issued "{value}"^^xsd:{datatype}.',
+                    subject="urn:s",
+                )
+                self.assertEqual(
+                    result.to_publication_metadata().publication_date, date(2020, 2, 29)
+                )
+                self.assertEqual(
+                    result.publication_date.selection.evidence[0].triples[0][2],
+                    f'"{value}"^^<{XSD[datatype]}>',
+                )
+
+    def test_xsd_end_of_day_remains_unresolved_when_rdflib_cannot_convert_it(self):
+        with self.assertLogs("rdflib.term", level="WARNING"):
+            result = harvest(
+                PREFIXES + '<urn:s> dct:issued "2020-01-01T24:00:00"^^xsd:dateTime.',
+                subject="urn:s",
+            )
+        self.assertEqual(result.publication_date.status, "unresolved")
+        self.assertEqual(result.publication_date.candidates, ())
+        with self.assertRaises(IncompleteHarvestError):
+            result.to_publication_metadata()
+
     def test_direct_date_aliases_and_normalization_keep_all_support(self):
         result = harvest(
             PREFIXES + """

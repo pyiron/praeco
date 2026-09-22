@@ -102,10 +102,32 @@ def _doi(term: _Term) -> str | None:
     return value.lower() if re.fullmatch(r"10\.\d{4,9}/\S+", value) else None
 
 
+def _valid_typed_date(term: Literal) -> bool:
+    """Check XSD syntax and calendar validity within Python's year range."""
+    pattern = r"[0-9]{4}-[0-9]{2}-[0-9]{2}"
+    if term.datatype == XSD.dateTime:
+        # XSD permits midnight at the end of a day; conversion must also be
+        # supported by RDFLib before such a value can become a candidate.
+        pattern += (
+            r"T(?:(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\.[0-9]+)?"
+            r"|24:00:00(?:\.0+)?)"
+        )
+    pattern = rf"(?:{pattern})(?:Z|[+-](?:0[0-9]|1[0-3]):[0-5][0-9]|[+-]14:00)?"
+    if re.fullmatch(pattern, str(term)) is None:
+        return False
+    try:
+        date.fromisoformat(str(term)[:10])
+    except ValueError:
+        return False
+    return True
+
+
 def _date(term: _Term) -> date | None:
     if not isinstance(term, Literal):
         return None
     if term.datatype in (XSD.date, XSD.dateTime):
+        if not _valid_typed_date(term):
+            return None
         parsed = term.toPython()
         if isinstance(parsed, datetime):
             return parsed.date()
