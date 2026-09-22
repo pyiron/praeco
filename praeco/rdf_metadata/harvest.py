@@ -3,14 +3,37 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field, replace
+from copy import deepcopy
+from dataclasses import asdict, dataclass, field, replace
+from datetime import date
 from pathlib import Path
-from typing import Self
+from typing import Any, Self, Unpack, cast
 
 from rdflib import Graph, URIRef
 
 from praeco.exceptions import ValidationError
-from praeco.rdf_metadata.models import Diagnostic, SourceInfo, SubjectRecord
+from praeco.metadata import (
+    Contributor,
+    Organization,
+    Person,
+    PublicationMetadata,
+    RelatedIdentifier,
+)
+from praeco.rdf_metadata.extraction import extract_fields
+from praeco.rdf_metadata.models import (
+    FIELD_NAMES,
+    OPTIONAL_FIELDS,
+    Candidate,
+    CreatorReview,
+    Diagnostic,
+    FieldName,
+    FieldReview,
+    IncompleteHarvestError,
+    MetadataOverrides,
+    OptionalField,
+    SourceInfo,
+    SubjectRecord,
+)
 from praeco.rdf_metadata.source import LoadedSource, load_source
 
 
@@ -22,6 +45,64 @@ class RdfMetadataHarvest:
     _preferred_languages: tuple[str | None, ...] = field(repr=False)
     subject: SubjectRecord | None = None
     _requested_subject: URIRef | None = field(default=None, repr=False)
+    _reviews: tuple[FieldReview[object], ...] = field(
+        default_factory=lambda: tuple(
+            FieldReview(name) for name in FIELD_NAMES if name != "creators"
+        ),
+        repr=False,
+    )
+    _creators: CreatorReview = field(default_factory=CreatorReview, repr=False)
+
+    def _raw_field(self, name: FieldName) -> FieldReview[object]:
+        return next(review for review in self._reviews if review.field == name)
+
+    def _public_field(self, name: FieldName) -> FieldReview[Any]:
+        review = self._raw_field(name)
+        return replace(review, value=deepcopy(review.value))
+
+    @property
+    def title(self) -> FieldReview[str]:
+        return self._public_field("title")
+
+    @property
+    def description(self) -> FieldReview[str]:
+        return self._public_field("description")
+
+    @property
+    def publication_date(self) -> FieldReview[date]:
+        return self._public_field("publication_date")
+
+    @property
+    def contributors(self) -> FieldReview[tuple[Contributor, ...]]:
+        return self._public_field("contributors")
+
+    @property
+    def keywords(self) -> FieldReview[tuple[str, ...]]:
+        return self._public_field("keywords")
+
+    @property
+    def license(self) -> FieldReview[str]:
+        return self._public_field("license")
+
+    @property
+    def doi(self) -> FieldReview[str]:
+        return self._public_field("doi")
+
+    @property
+    def version(self) -> FieldReview[str]:
+        return self._public_field("version")
+
+    @property
+    def language(self) -> FieldReview[str]:
+        return self._public_field("language")
+
+    @property
+    def related_identifiers(self) -> FieldReview[tuple[RelatedIdentifier, ...]]:
+        return self._public_field("related_identifiers")
+
+    @property
+    def creators(self) -> CreatorReview:
+        return replace(self._creators, value=deepcopy(self._creators.value))
 
     @property
     def source(self) -> SourceInfo:
@@ -34,7 +115,37 @@ class RdfMetadataHarvest:
     @property
     def diagnostics(self) -> tuple[Diagnostic, ...]:
         if self.subject is not None:
-            return ()
+            diagnostics = []
+            for review in self._reviews:
+                if review.status == "unresolved" or (
+                    review.field in ("title", "description")
+                    and review.status == "missing"
+                ):
+                    diagnostics.append(
+                        Diagnostic(
+                            (
+                                "unresolved_field"
+                                if review.status == "unresolved"
+                                else "missing_required"
+                            ),
+                            review.field,
+                            self.subject.term,
+                            f"{review.field} requires review.",
+                            True,
+                            review.observations,
+                        )
+                    )
+            if self._creators.status != "resolved":
+                diagnostics.append(
+                    Diagnostic(
+                        "missing_required",
+                        "creators",
+                        self.subject.term,
+                        "creators requires a non-empty reviewed list.",
+                        True,
+                    )
+                )
+            return tuple(diagnostics)
         if self._requested_subject is not None:
             return (
                 Diagnostic(
@@ -72,11 +183,155 @@ class RdfMetadataHarvest:
                 raise ValidationError("subject is fixed; create a separate harvest")
             return self
         record = next((item for item in self.subjects if item.term == term), None)
+        reviews = self._reviews
+        if record is not None:
+            extracted = extract_fields(
+                self._source.graph,
+                record.term,
+                self._preferred_languages,
+                self._source.token,
+            )
+            reviews = tuple(
+                next((item for item in extracted if item.field == review.field), review)
+                for review in reviews
+            )
         return replace(
             self,
             subject=record,
             _requested_subject=URIRef(term) if record is None else None,
+            _reviews=reviews,
         )
+
+    def _require_subject(self) -> SubjectRecord:
+        if self.subject is None:
+            raise ValidationError("select a valid subject before reviewing fields")
+        return self.subject
+
+    def _replace_field(self, review: FieldReview[object]) -> Self:
+        return replace(
+            self,
+            _reviews=tuple(
+                review if item.field == review.field else item for item in self._reviews
+            ),
+        )
+
+    def select_candidate(self, candidate: Candidate[str] | Candidate[date]) -> Self:
+        """Choose one of this publication's observed scalar candidates."""
+        subject = self._require_subject()
+        if (
+            not isinstance(candidate, Candidate)
+            or candidate.field
+            in ("creators", "contributors", "keywords", "related_identifiers")
+            or candidate.field not in FIELD_NAMES
+        ):
+            raise ValidationError("select an observed scalar candidate")
+        review = self._raw_field(candidate.field)
+        if (
+            candidate._context is not self._source.token
+            or candidate._subject != subject.term
+            or not any(candidate is item for item in review.candidates)
+        ):
+            raise ValidationError(
+                "candidate does not belong to this source and subject"
+            )
+        return self._replace_field(
+            replace(
+                review,
+                value=candidate.value,
+                selection=candidate,
+                status="resolved",
+                origin="selection",
+            )
+        )
+
+    def with_overrides(self, **changes: Unpack[MetadataOverrides]) -> Self:
+        """Replace only supplied fields, preserving their original observations."""
+        self._require_subject()
+        unknown = changes.keys() - set(FIELD_NAMES)
+        if unknown:
+            raise ValidationError(
+                f"unknown metadata fields: {', '.join(sorted(unknown))}"
+            )
+        # Validate partial input through the neutral model; placeholders are used
+        # only for unsupplied required fields and never enter the harvest.
+        supplied: dict[str, Any] = deepcopy(dict(changes))
+        for name in ("creators", "contributors", "related_identifiers"):
+            if name in supplied and isinstance(supplied[name], (tuple, list)):
+                supplied[name] = tuple(
+                    _revalidate_object(item) for item in supplied[name]
+                )
+        values: dict[str, Any] = dict(
+            title="validation",
+            description="validation",
+            creators=(Person(name="validation"),),
+        )
+        values.update(supplied)
+        validated = PublicationMetadata(**values)
+        result = self
+        for name in changes:
+            value = getattr(validated, name)
+            if name == "creators":
+                result = replace(
+                    result,
+                    _creators=replace(
+                        result._creators,
+                        value=value,
+                        status="resolved",
+                        origin="override",
+                    ),
+                )
+            else:
+                review = result._raw_field(cast(FieldName, name))
+                excluded = value is None or value == ()
+                result = result._replace_field(
+                    replace(
+                        review,
+                        value=value,
+                        selection=None,
+                        status="excluded" if excluded else "resolved",
+                        origin="exclusion" if excluded else "override",
+                    )
+                )
+        return result
+
+    def clear(self, field: OptionalField) -> Self:
+        """Explicitly exclude an optional value without erasing RDF evidence."""
+        self._require_subject()
+        if field not in OPTIONAL_FIELDS:
+            raise ValidationError("only optional metadata fields may be cleared")
+        review = self._raw_field(field)
+        value = (
+            () if field in ("contributors", "keywords", "related_identifiers") else None
+        )
+        return self._replace_field(
+            replace(
+                review,
+                value=value,
+                selection=None,
+                status="excluded",
+                origin="exclusion",
+            )
+        )
+
+    def to_publication_metadata(self) -> PublicationMetadata:
+        """Convert only a completed review; service defaults remain adapter-owned."""
+        blocking = tuple(item for item in self.diagnostics if item.blocking)
+        if blocking:
+            raise IncompleteHarvestError(blocking)
+        values: dict[str, Any] = {
+            review.field: deepcopy(review.value)
+            for review in self._reviews
+            if review.status in ("resolved", "excluded")
+        }
+        values["creators"] = deepcopy(self._creators.value)
+        return PublicationMetadata(**values)
+
+
+def _revalidate_object(value: Any) -> Any:
+    """Snapshot and revalidate the supported mutable neutral model objects."""
+    if isinstance(value, (Person, Organization, Contributor, RelatedIdentifier)):
+        return type(value)(**asdict(value))
+    return value
 
 
 def harvest_publication_metadata_from_rdf(

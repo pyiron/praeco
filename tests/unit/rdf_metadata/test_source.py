@@ -133,7 +133,9 @@ class TestLocalSources(unittest.TestCase):
                     self.assertIsInstance(loaded.subjects[0].term, BNode)
                     result = loaded.select_subject(loaded.subjects[0])
                     self.assertEqual(result.subject, loaded.subjects[0])
-                    self.assertEqual(result.diagnostics, ())
+                    self.assertFalse(
+                        any(d.code.startswith("subject_") for d in result.diagnostics)
+                    )
 
     def test_subject_inspection_does_not_filter_or_rank_resources(self):
         text = """
@@ -158,7 +160,7 @@ class TestLocalSources(unittest.TestCase):
         self.assertEqual(loaded.diagnostics[0].code, "subject_not_found")
         result = loaded.select_subject(URIRef("urn:a"))
         self.assertEqual(result.subject.term, URIRef("urn:a"))
-        self.assertEqual(result.diagnostics, ())
+        self.assertFalse(any(d.code.startswith("subject_") for d in result.diagnostics))
         self.assertEqual(harvest("").subjects, ())
 
     def test_selected_subject_is_fixed_and_foreign_records_are_rejected(self):
