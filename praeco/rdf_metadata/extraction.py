@@ -8,6 +8,7 @@ from dataclasses import replace
 from datetime import date, datetime
 from typing import Literal as TypeLiteral
 from typing import TypeVar, cast
+from urllib.parse import unquote, urlsplit
 
 from rdflib import (
     DC,
@@ -86,7 +87,18 @@ def _doi(term: _Term) -> str | None:
     value = _license(term)
     if value is None:
         return None
-    value = re.sub(r"^(?:doi:\s*|https?://(?:dx\.)?doi\.org/)", "", value, flags=re.I)
+    if re.match(r"^https?://", value, flags=re.I):
+        try:
+            resolver = urlsplit(value)
+            if resolver.netloc.lower() not in ("doi.org", "dx.doi.org"):
+                return None
+            if re.search(r"%(?![0-9a-fA-F]{2})", resolver.path):
+                return None
+            value = unquote(resolver.path.removeprefix("/"), errors="strict")
+        except (ValueError, UnicodeError):
+            return None
+    else:
+        value = re.sub(r"^doi:\s*", "", value, flags=re.I)
     return value.lower() if re.fullmatch(r"10\.\d{4,9}/\S+", value) else None
 
 

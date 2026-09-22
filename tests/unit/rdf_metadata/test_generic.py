@@ -239,6 +239,44 @@ class TestOtherGenericFields(unittest.TestCase):
                 self.assertIsNone(ordinary.to_publication_metadata().doi)
                 self.assertEqual(len(ordinary.doi.observations), 1)
 
+    def test_resolver_paths_decode_once_and_merge_with_bare_dois(self):
+        for resolver, bare in (
+            ("https://doi.org/10.1234/a%2Fb?download=1#view", "10.1234/a/b"),
+            ("HTTP://DX.DOI.ORG/10.1234/A%2bB", "10.1234/a+b"),
+            ("https://doi.org/10.1234/a+b", "10.1234/a+b"),
+            ("https://doi.org/10.1234/a%252Fb", "10.1234/a%2fb"),
+            ("https://doi.org/10.1234/a%3Fb%23c", "10.1234/a?b#c"),
+        ):
+            with self.subTest(resolver=resolver):
+                result = harvest(
+                    PREFIXES
+                    + f'<urn:s> dct:identifier <{resolver}>, "{bare}", "doi:{bare}".',
+                    subject="urn:s",
+                )
+                self.assertEqual(result.to_publication_metadata().doi, bare)
+                self.assertEqual(len(result.doi.candidates), 1)
+                evidence = result.doi.selection.evidence
+                self.assertEqual(len(evidence), 3)
+                self.assertIn(f"<{resolver}>", [e.triples[0][2] for e in evidence])
+
+    def test_invalid_resolver_urls_remain_identifier_observations(self):
+        for value in (
+            "https://doi.org/10.1234/a%ZZ",
+            "https://doi.org/10.1234/a%FF",
+            "https://doi.org/10.1234/a%20b",
+            "https://[invalid/10.1234/abc",
+            "https://doi.org.example/10.1234/abc",
+            "https://user@doi.org/10.1234/abc",
+        ):
+            with self.subTest(value=value):
+                result = harvest(
+                    PREFIXES + f'<urn:s> dct:identifier "{value}".', subject="urn:s"
+                )
+                self.assertIsNone(result.to_publication_metadata().doi)
+                self.assertEqual(result.doi.status, "missing")
+                self.assertEqual(len(result.doi.observations), 1)
+                self.assertEqual(result.diagnostics[0].code, "unmapped_identifier")
+
     def test_keywords_collect_all_languages_without_splitting_strings(self):
         result = harvest(
             PREFIXES + """<urn:s> dct:subject " steel "@en;
