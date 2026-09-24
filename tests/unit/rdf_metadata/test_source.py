@@ -7,13 +7,53 @@ from pathlib import Path
 from unittest.mock import patch
 
 import rdflib
-from rdflib import XSD, BNode, Dataset, Graph, Literal, URIRef
+from rdflib import XSD, BNode, ConjunctiveGraph, Dataset, Graph, Literal, URIRef
 
 from praeco.exceptions import ValidationError
 from praeco.rdf_metadata import harvest_publication_metadata_from_rdf as harvest
 
 
 class TestLocalSources(unittest.TestCase):
+    def test_conjunctive_containers_require_explicit_graph_selection(self):
+        for location in ("empty", "default", "named", "multiple"):
+            with self.subTest(location=location):
+                with self.assertWarns(DeprecationWarning):
+                    container = ConjunctiveGraph()
+                triple = (URIRef("urn:s"), URIRef("urn:p"), Literal("value"))
+                if location == "default":
+                    container.add(triple)
+                elif location in ("named", "multiple"):
+                    container.get_context(URIRef("urn:first")).add(triple)
+                    if location == "multiple":
+                        container.get_context(URIRef("urn:second")).add(triple)
+                before = set(container.quads())
+                with self.assertRaisesRegex(
+                    ValidationError,
+                    "Context-aware graph input requires an explicit graph",
+                ) as caught:
+                    harvest(container)
+                self.assertIn("get_context(identifier)", str(caught.exception))
+                self.assertEqual(set(container.quads()), before)
+
+    def test_explicit_conjunctive_contexts_are_snapshotted_independently(self):
+        with self.assertWarns(DeprecationWarning):
+            container = ConjunctiveGraph()
+        first = container.get_context(URIRef("urn:first"))
+        second = container.get_context(URIRef("urn:second"))
+        subject, predicate = URIRef("urn:s"), URIRef("http://purl.org/dc/terms/title")
+        first.add((subject, predicate, Literal("First title")))
+        second.add((subject, predicate, Literal("Second title")))
+        before = set(container.quads())
+        for graph, title in ((first, "First title"), (second, "Second title")):
+            with self.subTest(title=title):
+                result = harvest(graph, subject=subject)
+                self.assertEqual(result.title.value, title)
+                self.assertEqual(result.source.triple_count, 1)
+                self.assertEqual(len(result.title.candidates), 1)
+                self.assertEqual(set(container.quads()), before)
+        second.remove((None, None, None))
+        self.assertEqual(result.title.value, "Second title")
+
     def test_dataset_containers_require_explicit_graph_selection(self):
         for location in ("empty", "default", "named"):
             with self.subTest(location=location):

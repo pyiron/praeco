@@ -67,12 +67,19 @@ def load_source(source: Graph | str | bytes | Path) -> LoadedSource:
 
     A supplied Graph retains its existing terms; lexical information already
     lost during the caller's parsing cannot be recovered.
-    Dataset containers require the caller to select an individual graph.
+    Dataset and other context-aware containers require the caller to select
+    an individual graph.
     """
     if isinstance(source, Dataset):
         raise ValidationError(
             "Dataset input requires an explicit graph; pass "
             "dataset.default_graph or dataset.graph(identifier)"
+        )
+    if isinstance(source, Graph) and source.context_aware:
+        raise ValidationError(
+            "Context-aware graph input requires an explicit graph; "
+            "pass an individual graph, such as "
+            "conjunctive_graph.get_context(identifier)"
         )
     raw: bytes | None = None
     kind: TypeLiteral["graph", "text", "bytes", "path"]
