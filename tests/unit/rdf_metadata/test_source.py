@@ -199,7 +199,7 @@ class TestLocalSources(unittest.TestCase):
             path.write_text(text)
             self.assertEqual(
                 harvest(path).subjects[0].term,
-                URIRef((path.parent / "dataset").as_uri()),
+                URIRef((path.resolve().parent / "dataset").as_uri()),
             )
             explicit = "@base <https://example.org/base/> . " + text
             path.write_text(explicit)
