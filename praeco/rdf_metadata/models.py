@@ -91,7 +91,9 @@ class Candidate(Generic[T]):
     """A normalized observation; evidence retains every original RDF term."""
 
     field: FieldName
-    value: T
+    # Work around mypy's Python 3.13 __replace__ variance bug until a fixed release:
+    # https://github.com/python/mypy/issues/21736
+    value: T  # type: ignore[misc]
     evidence: tuple[Evidence, ...]
     _context: object = dc_field(default_factory=object, repr=False, compare=False)
     _subject: URIRef | BNode | None = dc_field(default=None, repr=False, compare=False)
@@ -102,7 +104,9 @@ class Suggestion(Generic[T]):
     """A weaker or derived value that requires explicit acceptance."""
 
     field: FieldName
-    value: T
+    # Work around mypy's Python 3.13 __replace__ variance bug until a fixed release:
+    # https://github.com/python/mypy/issues/21736
+    value: T  # type: ignore[misc]
     evidence: tuple[Evidence, ...]
     _context: object = dc_field(default_factory=object, repr=False, compare=False)
     _subject: URIRef | BNode | None = dc_field(default=None, repr=False, compare=False)
