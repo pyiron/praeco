@@ -15,6 +15,10 @@ from praeco.metadata import (
     PublicationMetadata,
     RelatedIdentifier,
 )
+from praeco.rdf_metadata import (
+    RdfMetadataHarvest,
+    harvest_publication_metadata_from_rdf,
+)
 from praeco.services.dataportal import DataportalClient
 from praeco.services.ontodocker import OntodockerClient
 from praeco.services.zenodo import ZenodoClient
@@ -27,6 +31,8 @@ __all__ = [
     "Organization",
     "Person",
     "PublicationMetadata",
+    "RdfMetadataHarvest",
     "RelatedIdentifier",
     "ZenodoClient",
+    "harvest_publication_metadata_from_rdf",
 ]
