@@ -23,7 +23,7 @@ classifiers = [
 ]
 dependencies = [
     "pandas==3.0.5",
-    "pydantic==2.13.4",
+    "pydantic==2.13.5",
     "rdflib==7.6.0",
     "requests==2.34.2",
     "sparqlwrapper==2.0.0",
