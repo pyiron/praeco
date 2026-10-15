@@ -61,7 +61,7 @@ def write_response_to_path(
         if not overwrite and target.exists():
             raise FileExistsError(f"target file already exists: {target}")
         target.parent.mkdir(parents=True, exist_ok=True)
-        temporary = target.with_name(f".{target.name}.{uuid.uuid4().hex}.part")
+        temporary = target.parent / f".{uuid.uuid4().hex}.part"
         try:
             digest = hashlib.md5(usedforsecurity=False)
             written = 0
