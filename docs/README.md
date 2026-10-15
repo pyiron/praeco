@@ -20,7 +20,7 @@ Service clients implement domain workflows:
 
 - `OntodockerClient` exposes `endpoints`, `datasets`, and `sparql` resources.
 - `DataportalClient` exposes `datasets`, `assets`, `rdf`, and `sparql` resources.
-- `ZenodoClient` exposes `depositions`, `files`, and `licenses` resources.
+- `ZenodoClient` exposes `depositions`, `files`, `licenses`, and `records` resources.
 
 Protocol clients provide reusable transport behavior:
 
@@ -259,11 +259,11 @@ See the [DataportalClient notebook](https://github.com/pyiron/praeco/blob/main/n
 
 ### ZenodoClient
 
-`ZenodoClient` is the service-specific client for Zenodo deposition drafts, file uploads, metadata authoring, license lookup, and publication actions.
+`ZenodoClient` is the service-specific client for Zenodo deposition drafts, file uploads, record file downloads, metadata authoring, license lookup, and publication actions.
 
 #### Architecture
 
-A `ZenodoClient` exposes three resource objects:
+A `ZenodoClient` exposes four resource objects:
 
 ```python
 from praeco import ZenodoClient
@@ -273,6 +273,7 @@ client = ZenodoClient(sandbox=True, token="your-sandbox-token")
 client.depositions
 client.files
 client.licenses
+client.records
 ```
 
 `client.depositions` owns draft and publication lifecycle operations such as creating drafts, setting metadata, publishing, editing, discarding edits, creating new versions, and deleting unpublished drafts.
@@ -280,6 +281,8 @@ client.licenses
 `client.files` owns draft-file operations such as listing, uploading, renaming, and deleting files. File uploads use the bucket link returned by Zenodo.
 
 `client.licenses` provides read-only lookup of Zenodo license metadata.
+
+`client.records.files` lists and downloads the files of published records and of your own drafts through the InvenioRDM records API. It is read-only; see Downloading Record Files below.
 
 The current draft/deposition implementation uses Zenodo's legacy deposition API. This is the Zenodo-specific API still used for the core create, upload, update, and publish workflow implemented here. A future migration toward the newer InvenioRDM REST API is expected, but the existing resource surface is kept stable until there is a tested migration path.
 
@@ -372,6 +375,46 @@ artifact.unlink(missing_ok=True)
 ```
 
 Production Zenodo should be treated differently from the sandbox. Publishing on production Zenodo creates a real archival record; a DOI becomes a persistent, citable scholarly identifier when the record is published.
+
+#### Downloading Record Files
+
+`client.records.files` lists and downloads the files of a Zenodo record by its record id. Open published records need no token:
+
+```python
+from praeco import ZenodoClient
+
+client = ZenodoClient()
+
+names = client.records.files.list(1234567)
+paths = client.records.files.download(1234567, names[0], directory="downloads")
+paths = client.records.files.download_all(1234567, directory="downloads")
+```
+
+`list()` returns the file keys in the order Zenodo reports them. `download()` accepts one key or a sequence of keys, which must match `list()` exactly; unknown or duplicate keys raise `ValidationError` before any file is downloaded. Both download methods return the written paths, `Path(directory) / key`, in the order requested; `download_all()` follows the order of `list()`.
+
+With a token, the same calls read the files of your own unpublished drafts and edit drafts when you pass `draft=True`. A `DepositionInfo` can be passed in place of the record id:
+
+```python
+client = ZenodoClient(sandbox=True, token=os.environ["ZENODO_SANDBOX_TOKEN"])
+draft = client.depositions.create()  # or any DepositionInfo of your own drafts
+
+draft_names = client.records.files.list(draft, draft=True)
+draft_paths = client.records.files.download_all(
+    draft,
+    directory="draft-files",
+    draft=True,
+)
+```
+
+`draft=False`, the default, always reads the published record's files; there is no automatic fallback to a draft.
+
+Each file is streamed to a temporary file next to its target and checked against the size and MD5 checksum reported by Zenodo before it is moved into place, so a failed or mismatched download leaves no partial file behind. Mismatches raise `ValidationError`. Files completed earlier in the same call are kept.
+
+Keys that contain `/` are written to matching subdirectories of `directory`, which are created as needed. Keys that are empty, absolute, contain `..`, or would resolve outside `directory` are rejected with `ValidationError`.
+
+Existing files are not replaced by default: if any target already exists, `FileExistsError` is raised before anything is downloaded. Pass `overwrite=True` to replace existing files.
+
+`client.files` stays the legacy deposition file API used for uploads and for listing, renaming, and deleting the files of your own drafts. It does not download files; use `client.records.files` for that.
 
 #### Metadata
 
