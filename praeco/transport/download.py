@@ -52,7 +52,8 @@ def write_response_to_path(
     Raises
     ------
     FileExistsError
-        If the target exists and `overwrite` is False.
+        If the target exists, or appears while streaming, and `overwrite` is
+        False.
     ValidationError
         If the written size or MD5 digest differs from the expected value.
     """
@@ -82,7 +83,7 @@ def write_response_to_path(
                     f"MD5 mismatch for {target}: expected {md5.lower()}, "
                     f"received {digest.hexdigest()}"
                 )
-            os.replace(temporary, target)
+            _move_into_place(temporary, target, overwrite=overwrite)
         except BaseException:
             with contextlib.suppress(OSError):
                 temporary.unlink(missing_ok=True)
@@ -90,3 +91,26 @@ def write_response_to_path(
         return target
     finally:
         response.close()
+
+
+def _move_into_place(temporary: Path, target: Path, *, overwrite: bool) -> None:
+    """Move a verified temporary file to `target`.
+
+    Without `overwrite`, a hard link claims the target atomically, so a file
+    created there while the body was streaming is never replaced. Where hard
+    links are unsupported, the target is checked once more before replacing.
+    """
+    if overwrite:
+        os.replace(temporary, target)
+        return
+    try:
+        os.link(temporary, target)
+    except FileExistsError:
+        raise FileExistsError(f"target file already exists: {target}") from None
+    except OSError:
+        if os.path.lexists(target):
+            raise FileExistsError(f"target file already exists: {target}") from None
+        os.replace(temporary, target)
+        return
+    with contextlib.suppress(OSError):
+        temporary.unlink()
