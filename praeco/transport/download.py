@@ -56,8 +56,8 @@ def write_response_to_path(
     ValidationError
         If the written size or MD5 digest differs from the expected value.
     """
-    target = Path(path)
     try:
+        target = Path(path)
         if not overwrite and target.exists():
             raise FileExistsError(f"target file already exists: {target}")
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -87,6 +87,6 @@ def write_response_to_path(
             with contextlib.suppress(OSError):
                 temporary.unlink(missing_ok=True)
             raise
+        return target
     finally:
         response.close()
-    return target
