@@ -1,3 +1,4 @@
+import os
 import unittest
 from collections.abc import Iterator
 from pathlib import Path
@@ -196,6 +197,78 @@ class TestWriteResponseToPath(unittest.TestCase):
         _write(response, self.root / "file.txt")
 
         self.assertEqual(response.chunk_sizes, [1024 * 1024])
+
+    def test_accepts_str_path(self):
+        response = StreamingResponse([b"abc"])
+        target = self.root / "file.txt"
+
+        result = write_response_to_path(cast(Any, response), str(target))
+
+        self.assertIsInstance(result, Path)
+        self.assertEqual(result, target)
+        self.assertEqual(target.read_bytes(), b"abc")
+
+    def test_invalid_path_raises_and_closes_response(self):
+        response = StreamingResponse([b"abc"])
+
+        with self.assertRaises(TypeError):
+            write_response_to_path(cast(Any, response), cast(Any, None))
+
+        self.assertTrue(response.closed)
+        self.assertEqual(response.chunk_sizes, [])
+
+    def test_long_target_name_downloads_without_leftovers(self):
+        name = "n" * 246 + ".bin"
+        self.assertEqual(len(name), 250)
+
+        response = StreamingResponse([b"abc"])
+        result = _write(response, self.root / name, md5=MD5_ABC, size=3)
+
+        self.assertEqual(result, self.root / name)
+        self.assertEqual((self.root / name).read_bytes(), b"abc")
+        self.assertEqual(_tree(self.root), [name])
+
+        failed = StreamingResponse([b"abc"])
+        other = "m" * 246 + ".bin"
+        with self.assertRaises(ValidationError):
+            _write(failed, self.root / other, md5=MD5_HELLO_WORLD)
+
+        self.assertEqual(_tree(self.root), [name])
+        self.assertTrue(failed.closed)
+
+    def _dangling_symlink(self, name: str) -> tuple[Path, Path]:
+        link = self.root / name
+        destination = self.root / "missing-destination"
+        try:
+            link.symlink_to(destination)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"symlinks unavailable: {exc}")
+        return link, destination
+
+    def test_dangling_symlink_target_counts_as_existing(self):
+        link, destination = self._dangling_symlink("file.txt")
+        response = StreamingResponse([b"abc"])
+
+        with self.assertRaises(FileExistsError):
+            _write(response, link)
+
+        self.assertTrue(link.is_symlink())
+        self.assertFalse(os.path.lexists(destination))
+        self.assertEqual(_tree(self.root), ["file.txt"])
+        self.assertTrue(response.closed)
+
+    def test_overwrite_replaces_dangling_symlink_with_regular_file(self):
+        link, destination = self._dangling_symlink("file.txt")
+        response = StreamingResponse([b"abc"])
+
+        result = _write(response, link, overwrite=True, md5=MD5_ABC, size=3)
+
+        self.assertEqual(result, link)
+        self.assertFalse(link.is_symlink())
+        self.assertTrue(link.is_file())
+        self.assertEqual(link.read_bytes(), b"abc")
+        self.assertFalse(os.path.lexists(destination))
+        self.assertEqual(_tree(self.root), ["file.txt"])
 
 
 if __name__ == "__main__":
