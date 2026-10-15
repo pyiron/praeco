@@ -58,7 +58,7 @@ def write_response_to_path(
     """
     try:
         target = Path(path)
-        if not overwrite and target.exists():
+        if not overwrite and os.path.lexists(target):
             raise FileExistsError(f"target file already exists: {target}")
         target.parent.mkdir(parents=True, exist_ok=True)
         temporary = target.parent / f".{uuid.uuid4().hex}.part"

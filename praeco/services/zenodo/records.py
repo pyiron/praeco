@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -243,7 +244,7 @@ def _target_paths(
     """
     targets = [_safe_target_path(directory, key) for key in keys]
     if not overwrite:
-        existing = [target for target in targets if target.exists()]
+        existing = [target for target in targets if os.path.lexists(target)]
         if existing:
             raise FileExistsError(
                 f"target files already exist: {[str(path) for path in existing]}"
