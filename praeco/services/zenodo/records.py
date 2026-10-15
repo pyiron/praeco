@@ -237,12 +237,16 @@ def _target_paths(
     *,
     overwrite: bool,
 ) -> _DownloadedPaths:
-    """Map keys to target paths, rejecting unsafe keys and existing targets.
+    """Map keys to target paths, rejecting every local problem up front.
 
-    Every key is checked for safety before any target is checked for
-    existence, so that an unsafe key is reported first.
+    The checks run in this order, so the first failing kind is reported:
+    unsafe keys and colliding keys (`ValidationError`), local paths that block
+    a target regardless of `overwrite` (`FileExistsError`), and existing
+    targets when `overwrite` is False (`FileExistsError`).
     """
     targets = [_safe_target_path(directory, key) for key in keys]
+    _check_no_target_collisions(keys)
+    _check_no_local_conflicts(directory, targets)
     if not overwrite:
         existing = [target for target in targets if os.path.lexists(target)]
         if existing:
@@ -250,6 +254,56 @@ def _target_paths(
                 f"target files already exist: {[str(path) for path in existing]}"
             )
     return targets
+
+
+def _check_no_target_collisions(keys: Sequence[str]) -> None:
+    """Reject keys whose normalized targets are equal or nested.
+
+    Keys such as ``"x/y"`` and ``"x//y"`` name the same local file, and a key
+    such as ``"a"`` cannot be both a file and the parent directory of
+    ``"a/b"``. Case is not folded.
+    """
+    first_key: dict[tuple[str, ...], str] = {}
+    collisions: list[tuple[str, str]] = []
+    for key in keys:
+        parts = Path(os.path.normpath(key)).parts
+        if parts in first_key:
+            collisions.append((first_key[parts], key))
+        else:
+            first_key[parts] = key
+    for parts, key in first_key.items():
+        for depth in range(1, len(parts)):
+            ancestor_key = first_key.get(parts[:depth])
+            if ancestor_key is not None:
+                collisions.append((ancestor_key, key))
+    if collisions:
+        raise ValidationError(
+            f"file keys map to the same or nested local paths: {collisions}"
+        )
+
+
+def _check_no_local_conflicts(directory: str | Path, targets: Sequence[Path]) -> None:
+    """Reject local paths that would block writing a target.
+
+    A target must not be an existing directory, and `directory` and every
+    path between it and the target must be a directory if it exists.
+    """
+    base = Path(directory)
+    blocking: list[Path] = []
+    if os.path.lexists(base) and not base.is_dir():
+        blocking.append(base)
+    for target in targets:
+        if target.is_dir():
+            blocking.append(target)
+        ancestor = base
+        for part in target.relative_to(base).parts[:-1]:
+            ancestor = ancestor / part
+            if os.path.lexists(ancestor) and not ancestor.is_dir():
+                blocking.append(ancestor)
+                break
+    if blocking:
+        unique = [str(path) for path in dict.fromkeys(blocking)]
+        raise FileExistsError(f"local paths block target files: {unique}")
 
 
 def _safe_target_path(directory: str | Path, key: str) -> Path:
