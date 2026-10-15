@@ -74,6 +74,31 @@ def deposition_file_url(
     )
 
 
+def record_files_url(base_url: str, record_id: int | str) -> str:
+    return join_url(
+        base_url,
+        segments=[
+            "api",
+            "records",
+            quote_path_segment(record_id, field_name="id"),
+            "files",
+        ],
+    )
+
+
+def record_draft_files_url(base_url: str, record_id: int | str) -> str:
+    return join_url(
+        base_url,
+        segments=[
+            "api",
+            "records",
+            quote_path_segment(record_id, field_name="id"),
+            "draft",
+            "files",
+        ],
+    )
+
+
 def licenses_url(base_url: str) -> str:
     return join_url(base_url, segments=["api", "vocabularies", "licenses"])
 
