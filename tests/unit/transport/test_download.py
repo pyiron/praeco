@@ -4,6 +4,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, cast
+from unittest import mock
 
 from praeco.exceptions import ValidationError
 from praeco.transport.download import write_response_to_path
@@ -35,6 +36,20 @@ class StreamingResponse:
 
     def close(self) -> None:
         self.closed = True
+
+
+class TargetAppearsResponse(StreamingResponse):
+    """Streamed response that creates the target file while streaming."""
+
+    def __init__(self, chunks: list[bytes], target: Path):
+        super().__init__(chunks)
+        self.target = target
+
+    def iter_content(self, chunk_size: int = 1) -> Iterator[bytes]:
+        for chunk in super().iter_content(chunk_size):
+            yield chunk
+            if not os.path.lexists(self.target):
+                self.target.write_bytes(b"concurrent")
 
 
 def _write(response: StreamingResponse, path: Path, **kwargs: Any) -> Path:
@@ -269,6 +284,51 @@ class TestWriteResponseToPath(unittest.TestCase):
         self.assertEqual(link.read_bytes(), b"abc")
         self.assertFalse(os.path.lexists(destination))
         self.assertEqual(_tree(self.root), ["file.txt"])
+
+    def test_target_appearing_while_streaming_is_kept(self):
+        target = self.root / "file.txt"
+        response = TargetAppearsResponse([b"a", b"bc"], target)
+
+        with self.assertRaises(FileExistsError):
+            _write(response, target, md5=MD5_ABC, size=3)
+
+        self.assertEqual(target.read_bytes(), b"concurrent")
+        self.assertEqual(_tree(self.root), ["file.txt"])
+        self.assertTrue(response.closed)
+
+    def test_overwrite_replaces_target_appearing_while_streaming(self):
+        target = self.root / "file.txt"
+        response = TargetAppearsResponse([b"a", b"bc"], target)
+
+        _write(response, target, overwrite=True, md5=MD5_ABC, size=3)
+
+        self.assertEqual(target.read_bytes(), b"abc")
+        self.assertEqual(_tree(self.root), ["file.txt"])
+
+    def test_without_hard_links_a_missing_target_is_written(self):
+        target = self.root / "file.txt"
+        response = StreamingResponse([b"abc"])
+
+        with mock.patch("os.link", side_effect=PermissionError("no hard links")):
+            result = _write(response, target, md5=MD5_ABC, size=3)
+
+        self.assertEqual(result, target)
+        self.assertEqual(target.read_bytes(), b"abc")
+        self.assertEqual(_tree(self.root), ["file.txt"])
+
+    def test_without_hard_links_a_target_appearing_while_streaming_is_kept(self):
+        target = self.root / "file.txt"
+        response = TargetAppearsResponse([b"a", b"bc"], target)
+
+        with (
+            mock.patch("os.link", side_effect=PermissionError("no hard links")),
+            self.assertRaises(FileExistsError),
+        ):
+            _write(response, target, md5=MD5_ABC, size=3)
+
+        self.assertEqual(target.read_bytes(), b"concurrent")
+        self.assertEqual(_tree(self.root), ["file.txt"])
+        self.assertTrue(response.closed)
 
 
 if __name__ == "__main__":
