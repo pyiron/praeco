@@ -420,6 +420,8 @@ Keys that contain `/` are written to matching subdirectories of `directory`, whi
 
 Existing files are not replaced by default: if any target already exists, `FileExistsError` is raised before anything is downloaded. Pass `overwrite=True` to replace existing files.
 
+Keys whose local paths coincide or nest, such as `x/y` and `x//y`, or `a` and `a/b`, raise `ValidationError`, and an existing directory at a target, or an existing file where a parent directory is needed, raises `FileExistsError` even with `overwrite=True`. Both are checked before anything is downloaded. On case-insensitive filesystems, keys that differ only in case refer to the same local file and are not detected up front.
+
 `client.files` stays the legacy deposition file API used for uploads and for listing, renaming, and deleting the files of your own drafts. It does not download files; use `client.records.files` for that.
 
 #### Metadata
