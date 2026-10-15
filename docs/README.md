@@ -1,23 +1,16 @@
 # praeco
 
-`praeco` provides Python clients for working with remote services used to
-publish, upload, query, and manage research and semantic assets.
+`praeco` provides Python clients for working with remote services used to publish, upload, query, and manage research and semantic assets.
 
 The main user-facing API is built around service clients:
 
-- `OntodockerClient` for Ontodocker-backed RDF datasets, endpoint discovery, and
-  SPARQL queries.
-- `DataportalClient` for datasets, assets, DCAT RDF, and SPARQL workflows on the
-  [MaterialDigital Dataportal](https://dataportal.material-digital.de).
-- `ZenodoClient` for Zenodo depositions, files, metadata, license lookup, and
-  publication workflows.
+- `OntodockerClient` for Ontodocker-backed RDF datasets, endpoint discovery, and SPARQL queries.
+- `DataportalClient` for datasets, assets, DCAT RDF, and SPARQL workflows on the [MaterialDigital Dataportal](https://dataportal.material-digital.de).
+- `ZenodoClient` for Zenodo depositions, files, metadata, license lookup, and publication workflows.
 
-`HttpClient` is the shared HTTP(S) base client used by service clients. Advanced
-users may also use it directly when they need low-level access to an HTTP API or
-want to prototype support for a new service.
+`HttpClient` is the shared HTTP(S) base client used by service clients. Advanced users may also use it directly when they need low-level access to an HTTP API or want to prototype support for a new service.
 
-`praeco` is not a workflow engine, scheduler, triple store, or archival backend.
-It is a client layer for talking to those services through explicit Python APIs.
+`praeco` is not a workflow engine, scheduler, triple store, or archival backend. It is a client layer for talking to those services through explicit Python APIs.
 
 ## Overview
 
@@ -31,17 +24,13 @@ Service clients implement domain workflows:
 
 Protocol clients provide reusable transport behavior:
 
-- `HttpClient` normalizes base URLs, manages bearer-token headers, handles
-  timeouts and TLS verification, and provides small request/response helpers.
+- `HttpClient` normalizes base URLs, manages bearer-token headers, handles timeouts and TLS verification, and provides small request/response helpers.
 
-New user code should usually start with a service client. Use `HttpClient`
-directly only when a service-specific method does not exist yet, or when you are
-developing a new service adapter.
+New user code should usually start with a service client. Use `HttpClient` directly only when a service-specific method does not exist yet, or when you are developing a new service adapter.
 
 ## Installation
 
-`praeco` supports Python 3.11 to 3.13. Development in this repository currently
-targets Python 3.12.
+`praeco` supports Python 3.11 to 3.13. Development in this repository currently targets Python 3.12.
 
 For local use or development:
 
@@ -55,21 +44,15 @@ pip install -e .
 
 If you want the documentation environment as well, see `docs/environment.yml`.
 
-PyPI and conda-forge releases are planned, but the current hands-on installation
-path is an editable install from the repository.
+PyPI and conda-forge releases are planned, but the current hands-on installation path is an editable install from the repository.
 
 ## Service Clients
 
-Service clients are the primary API for normal use. They subclass or build on
-`HttpClient`, then attach small resource objects for service-specific behavior.
-Generic transport code stays in `praeco/http_client.py` and
-`praeco/transport/`; service-specific routes, models, and error handling live
-under `praeco/services/<service>/`.
+Service clients are the primary API for normal use. They subclass or build on `HttpClient`, then attach small resource objects for service-specific behavior. Generic transport code stays in `praeco/http_client.py` and `praeco/transport/`; service-specific routes, models, and error handling live under `praeco/services/<service>/`.
 
 ### OntodockerClient
 
-`OntodockerClient` is the service-specific client for Ontodocker datasets,
-endpoint discovery, and SPARQL queries.
+`OntodockerClient` is the service-specific client for Ontodocker datasets, endpoint discovery, and SPARQL queries.
 
 #### Architecture
 
@@ -85,18 +68,13 @@ client.datasets
 client.sparql
 ```
 
-These resources share the same transport configuration: bearer-token
-authentication, timeout handling, TLS verification, and request execution come
-from `HttpClient`.
+These resources share the same transport configuration: bearer-token authentication, timeout handling, TLS verification, and request execution come from `HttpClient`.
 
-Endpoint discovery also contains Ontodocker-specific compatibility logic for
-historical endpoint URL formats. That behavior belongs to the Ontodocker service
-package rather than the generic transport layer.
+Endpoint discovery also contains Ontodocker-specific compatibility logic for historical endpoint URL formats. That behavior belongs to the Ontodocker service package rather than the generic transport layer.
 
 #### Basic Usage
 
-For notebooks or scripts, configure the service URL and optional token in the
-environment:
+For notebooks or scripts, configure the service URL and optional token in the environment:
 
 ```bash
 export ONTODOCKER_ADDRESS="https://ontodocker.example.org"
@@ -185,22 +163,13 @@ Path(downloaded).unlink(missing_ok=True)
 
 #### More Information
 
-Use `OntodockerClient` for dataset, endpoint, and SPARQL workflows. Use
-`HttpClient` directly only when you need an endpoint that the Ontodocker
-resources do not expose yet. If that endpoint becomes part of normal Ontodocker
-usage, add it as a method on an Ontodocker resource class instead of duplicating
-URL construction in notebooks or scripts.
+Use `OntodockerClient` for dataset, endpoint, and SPARQL workflows. Use `HttpClient` directly only when you need an endpoint that the Ontodocker resources do not expose yet. If that endpoint becomes part of normal Ontodocker usage, add it as a method on an Ontodocker resource class instead of duplicating URL construction in notebooks or scripts.
 
-See the
-[OntodockerClient notebook](https://github.com/pyiron/praeco/blob/main/notebooks/OntodockerClient.ipynb)
-for a runnable demo and more detailed usage.
+See the [OntodockerClient notebook](https://github.com/pyiron/praeco/blob/main/notebooks/OntodockerClient.ipynb) for a runnable demo and more detailed usage.
 
 ### DataportalClient
 
-`DataportalClient` supports publication and semantic-data workflows on the
-CKAN-backed [MaterialDigital Dataportal](https://dataportal.material-digital.de).
-It uses the Dataportal deployment by default, while still allowing another
-compatible address to be supplied explicitly.
+`DataportalClient` supports publication and semantic-data workflows on the CKAN-backed [MaterialDigital Dataportal](https://dataportal.material-digital.de). It uses the Dataportal deployment by default, while still allowing another compatible address to be supplied explicitly.
 
 #### Architecture
 
@@ -217,9 +186,7 @@ client.rdf
 client.sparql
 ```
 
-The client builds on praeco's shared HTTP and CKAN transport infrastructure.
-The resource objects provide typed dataset and asset operations, DCAT RDF
-retrieval, and discovery and querying of dataset-associated SPARQL endpoints.
+The client builds on praeco's shared HTTP and CKAN transport infrastructure. The resource objects provide typed dataset and asset operations, DCAT RDF retrieval, and discovery and querying of dataset-associated SPARQL endpoints.
 
 #### Basic Usage
 
@@ -239,9 +206,7 @@ from praeco import DataportalClient
 client = DataportalClient(api_token=os.environ["DATAPORTAL_TOKEN"])
 ```
 
-Service-independent publication fields are modeled with
-`PublicationMetadata`. Wrap them in `DataportalMetadata` to add CKAN and
-Dataportal-specific fields before creating a dataset:
+Service-independent publication fields are modeled with `PublicationMetadata`. Wrap them in `DataportalMetadata` to add CKAN and Dataportal-specific fields before creating a dataset:
 
 ```python
 from praeco import Person, PublicationMetadata
@@ -275,9 +240,7 @@ asset = client.assets.upload_rdf(
 )
 ```
 
-The Dataportal performs triplestore updates asynchronously. Once Fuseki indexing
-has completed and the generated SPARQL resource is available, query it through
-the dataset model:
+The Dataportal performs triplestore updates asynchronously. Once Fuseki indexing has completed and the generated SPARQL resource is available, query it through the dataset model:
 
 ```python
 dataset = client.datasets.show(dataset)
@@ -290,19 +253,13 @@ result = client.sparql.query_json(
 
 #### More Information
 
-Creating datasets and starting Fuseki updates require suitable permissions for
-the selected organization. Use disposable private datasets when validating
-write workflows against the live deployment, and clean them up afterwards.
+Creating datasets and starting Fuseki updates require suitable permissions for the selected organization. Use disposable private datasets when validating write workflows against the live deployment, and clean them up afterwards.
 
-See the
-[DataportalClient notebook](https://github.com/pyiron/praeco/blob/main/notebooks/DataportalClient.ipynb)
-for a complete live workflow covering organization discovery, metadata,
-datasets, RDF assets, Fuseki indexing, SPARQL querying, and cleanup.
+See the [DataportalClient notebook](https://github.com/pyiron/praeco/blob/main/notebooks/DataportalClient.ipynb) for a complete live workflow covering organization discovery, metadata, datasets, RDF assets, Fuseki indexing, SPARQL querying, and cleanup.
 
 ### ZenodoClient
 
-`ZenodoClient` is the service-specific client for Zenodo deposition drafts,
-file uploads, metadata authoring, license lookup, and publication actions.
+`ZenodoClient` is the service-specific client for Zenodo deposition drafts, file uploads, metadata authoring, license lookup, and publication actions.
 
 #### Architecture
 
@@ -318,20 +275,13 @@ client.files
 client.licenses
 ```
 
-`client.depositions` owns draft and publication lifecycle operations such as
-creating drafts, setting metadata, publishing, editing, discarding edits,
-creating new versions, and deleting unpublished drafts.
+`client.depositions` owns draft and publication lifecycle operations such as creating drafts, setting metadata, publishing, editing, discarding edits, creating new versions, and deleting unpublished drafts.
 
-`client.files` owns draft-file operations such as listing, uploading, renaming,
-and deleting files. File uploads use the bucket link returned by Zenodo.
+`client.files` owns draft-file operations such as listing, uploading, renaming, and deleting files. File uploads use the bucket link returned by Zenodo.
 
 `client.licenses` provides read-only lookup of Zenodo license metadata.
 
-The current draft/deposition implementation uses Zenodo's legacy deposition API.
-This is the Zenodo-specific API still used for the core create, upload, update,
-and publish workflow implemented here. A future migration toward the newer
-InvenioRDM REST API is expected, but the existing resource surface is kept
-stable until there is a tested migration path.
+The current draft/deposition implementation uses Zenodo's legacy deposition API. This is the Zenodo-specific API still used for the core create, upload, update, and publish workflow implemented here. A future migration toward the newer InvenioRDM REST API is expected, but the existing resource surface is kept stable until there is a tested migration path.
 
 #### Basic Usage
 
@@ -341,8 +291,7 @@ For development and testing, use the Zenodo sandbox:
 export ZENODO_SANDBOX_TOKEN="..."
 ```
 
-Sandbox and production Zenodo have separate accounts and tokens. A sandbox token
-must come from `https://sandbox.zenodo.org`, not production Zenodo.
+Sandbox and production Zenodo have separate accounts and tokens. A sandbox token must come from `https://sandbox.zenodo.org`, not production Zenodo.
 
 Create a client and a small artifact:
 
@@ -362,8 +311,7 @@ artifact.write_text(
 )
 ```
 
-Build service-independent publication metadata and wrap it in the Zenodo
-adapter:
+Build service-independent publication metadata and wrap it in the Zenodo adapter:
 
 ```python
 publication = PublicationMetadata(
@@ -384,9 +332,7 @@ publication = PublicationMetadata(
 metadata = ZenodoMetadata.software(publication)
 ```
 
-Directly setting publication fields such as `title`, `creators`, or `keywords`
-on `ZenodoMetadata` is deprecated. Use `PublicationMetadata` for reusable
-publication fields and `ZenodoMetadata` for Zenodo-specific fields.
+Directly setting publication fields such as `title`, `creators`, or `keywords` on `ZenodoMetadata` is deprecated. Use `PublicationMetadata` for reusable publication fields and `ZenodoMetadata` for Zenodo-specific fields.
 
 The deprecated direct style still works temporarily for migration:
 
@@ -404,8 +350,7 @@ metadata.creators.append(
 )
 ```
 
-Create an unpublished draft, pre-reserve a DOI, upload the artifact, and set the
-metadata:
+Create an unpublished draft, pre-reserve a DOI, upload the artifact, and set the metadata:
 
 ```python
 draft = client.depositions.create(prereserve_doi=True)
@@ -426,19 +371,13 @@ client.depositions.delete(draft)
 artifact.unlink(missing_ok=True)
 ```
 
-Production Zenodo should be treated differently from the sandbox. Publishing on
-production Zenodo creates a real archival record; a DOI becomes a persistent,
-citable scholarly identifier when the record is published.
+Production Zenodo should be treated differently from the sandbox. Publishing on production Zenodo creates a real archival record; a DOI becomes a persistent, citable scholarly identifier when the record is published.
 
 #### Metadata
 
-`PublicationMetadata` is praeco's service-independent authoring model for
-publication fields such as title, description, creators, contributors, related
-identifiers, keywords, license, DOI, version, language, and publication date.
+`PublicationMetadata` is praeco's service-independent authoring model for publication fields such as title, description, creators, contributors, related identifiers, keywords, license, DOI, version, language, and publication date.
 
-`ZenodoMetadata` adapts `PublicationMetadata` into Zenodo's API payload shape and
-keeps Zenodo-specific fields such as upload type, access control, communities,
-grants, DOI reservation, and notes.
+`ZenodoMetadata` adapts `PublicationMetadata` into Zenodo's API payload shape and keeps Zenodo-specific fields such as upload type, access control, communities, grants, DOI reservation, and notes.
 
 Convenience constructors set the upload type:
 
@@ -466,25 +405,17 @@ Zenodo-specific repeated metadata still uses Zenodo helpers:
 metadata_object = metadata.to_api_dict()
 ```
 
-`ZenodoMetadata.to_payload()` wraps that object as `{"metadata": ...}`, which is
-the shape used by Zenodo deposition create and update requests:
+`ZenodoMetadata.to_payload()` wraps that object as `{"metadata": ...}`, which is the shape used by Zenodo deposition create and update requests:
 
 ```python
 request_payload = metadata.to_payload()
 ```
 
-The typed model performs local validation for stable structural rules before a
-request is sent, such as required title, description, creator, access, and
-license fields.
+The typed model performs local validation for stable structural rules before a request is sent, such as required title, description, creator, access, and license fields.
 
-Plain `PublicationMetadata` is not passed directly to `client.depositions`.
-Wrap it in `ZenodoMetadata` so the Zenodo upload type and service-specific
-validation remain explicit.
+Plain `PublicationMetadata` is not passed directly to `client.depositions`. Wrap it in `ZenodoMetadata` so the Zenodo upload type and service-specific validation remain explicit.
 
-For Zenodo fields that are documented but not yet modeled by `ZenodoMetadata`,
-pass a raw mapping. Raw mappings are wrapped as `{"metadata": ...}` by
-`client.depositions.create()` and `client.depositions.set_metadata()`, but they
-do not receive praeco's local metadata validation:
+For Zenodo fields that are documented but not yet modeled by `ZenodoMetadata`, pass a raw mapping. Raw mappings are wrapped as `{"metadata": ...}` by `client.depositions.create()` and `client.depositions.set_metadata()`, but they do not receive praeco's local metadata validation:
 
 ```python
 raw_metadata = metadata.to_api_dict()
@@ -495,47 +426,32 @@ raw_metadata["references"] = [
 draft = client.depositions.set_metadata(draft, raw_metadata)
 ```
 
-Server responses use `DepositionInfo`. Its `metadata` field remains a raw
-dictionary because Zenodo may return normalized values or fields outside
-praeco's authoring model.
+Server responses use `DepositionInfo`. Its `metadata` field remains a raw dictionary because Zenodo may return normalized values or fields outside praeco's authoring model.
 
 #### Sandbox vs Production
 
-Zenodo sandbox is for testing API workflows, metadata, uploads, DOI reservation,
-and publication behavior. Sandbox records use test DOI infrastructure and should
-not be cited as persistent scholarly records. Sandbox data may also be reset.
+Zenodo sandbox is for testing API workflows, metadata, uploads, DOI reservation, and publication behavior. Sandbox records use test DOI infrastructure and should not be cited as persistent scholarly records. Sandbox data may also be reset.
 
-Production Zenodo is the real publication environment. Published production
-records are archival research outputs, and their DOIs are persistent scholarly
-identifiers. Use `ZenodoClient(sandbox=True, ...)` for development and switch to
-the default production target only when publication is intentional.
+Production Zenodo is the real publication environment. Published production records are archival research outputs, and their DOIs are persistent scholarly identifiers. Use `ZenodoClient(sandbox=True, ...)` for development and switch to the default production target only when publication is intentional.
 
 #### More Information
 
 Useful token scopes:
 
 - `deposit:write` for creating drafts, updating metadata, and uploading files.
-- `deposit:actions` for publishing, editing, discarding edits, and creating new
-  versions.
+- `deposit:actions` for publishing, editing, discarding edits, and creating new versions.
 
-Zenodo API failures raise `ZenodoApiError` or a more specific subclass such as
-`ZenodoValidationError`, `ZenodoAuthenticationError`, `ZenodoPermissionError`,
-or `ZenodoNotFoundError`. Local metadata and input validation failures use
-`praeco.exceptions.ValidationError`.
+Zenodo API failures raise `ZenodoApiError` or a more specific subclass such as `ZenodoValidationError`, `ZenodoAuthenticationError`, `ZenodoPermissionError`, or `ZenodoNotFoundError`. Local metadata and input validation failures use `praeco.exceptions.ValidationError`.
 
-See the
-[ZenodoClient notebook](https://github.com/pyiron/praeco/blob/main/notebooks/ZenodoClient.ipynb)
-for a sandbox demo and more detailed usage.
+See the [ZenodoClient notebook](https://github.com/pyiron/praeco/blob/main/notebooks/ZenodoClient.ipynb) for a sandbox demo and more detailed usage.
 
 ## Protocol Clients
 
-Protocol clients provide lower-level infrastructure for service clients and
-advanced use.
+Protocol clients provide lower-level infrastructure for service clients and advanced use.
 
 ### HttpClient
 
-`HttpClient` is the generic HTTP(S) client and base class for HTTP-backed
-service clients.
+`HttpClient` is the generic HTTP(S) client and base class for HTTP-backed service clients.
 
 #### Architecture
 
@@ -548,9 +464,7 @@ service clients.
 - exposing helpers for common text and JSON request patterns
 - raising consistent praeco HTTP errors
 
-Developers adding a new HTTP-based service client should usually put domain
-methods on small resource classes and let the service client inherit from or
-compose `HttpClient`.
+Developers adding a new HTTP-based service client should usually put domain methods on small resource classes and let the service client inherit from or compose `HttpClient`.
 
 #### Basic Usage
 
@@ -593,8 +507,7 @@ updated = client.put_text(
 deleted = client.delete_text("https://api.example.org/items/demo")
 ```
 
-Use `request()` when you need direct access to the underlying
-`requests.Response`:
+Use `request()` when you need direct access to the underlying `requests.Response`:
 
 ```python
 response = client.request(
@@ -612,41 +525,27 @@ Use `HttpClient` directly when:
 - you are prototyping support for a new service
 - the API is small enough that a full service client would not yet pay off
 
-Once route construction, response parsing, or workflow logic starts repeating,
-move that behavior into a service-specific client under `praeco/services/`.
+Once route construction, response parsing, or workflow logic starts repeating, move that behavior into a service-specific client under `praeco/services/`.
 
-See the
-[HttpClient notebook](https://github.com/pyiron/praeco/blob/main/notebooks/HttpClient.ipynb)
-for a runnable demonstration of the transport API.
+See the [HttpClient notebook](https://github.com/pyiron/praeco/blob/main/notebooks/HttpClient.ipynb) for a runnable demonstration of the transport API.
 
 ## Developer Guide
 
 The repository is organized by responsibility:
 
 - `praeco/http_client.py` contains the public reusable HTTP client.
-- `praeco/transport/` contains generic transport helpers for authentication,
-  session creation, URL normalization/composition, and response handling.
-- `praeco/services/ontodocker/` contains Ontodocker routes, resources, models,
-  and compatibility helpers.
-- `praeco/services/dataportal/` contains Dataportal datasets, assets, metadata,
-  DCAT RDF, SPARQL, and CKAN-backed models.
-- `praeco/services/zenodo/` contains Zenodo routes, resources, metadata
-  authoring objects, response models, and Zenodo-specific errors.
-- `tests/unit/` contains focused behavior tests using fake sessions and
-  responses where practical.
-- `tests/integration/` contains integration-oriented checks, including the
-  README doctest loader.
+- `praeco/transport/` contains generic transport helpers for authentication, session creation, URL normalization/composition, and response handling.
+- `praeco/services/ontodocker/` contains Ontodocker routes, resources, models, and compatibility helpers.
+- `praeco/services/dataportal/` contains Dataportal datasets, assets, metadata, DCAT RDF, SPARQL, and CKAN-backed models.
+- `praeco/services/zenodo/` contains Zenodo routes, resources, metadata authoring objects, response models, and Zenodo-specific errors.
+- `tests/unit/` contains focused behavior tests using fake sessions and responses where practical.
+- `tests/integration/` contains integration-oriented checks, including the README doctest loader.
 - `notebooks/` contains runnable demos for the public clients.
-- `.notes/` may contain local planning or investigation notes. Treat these as
-  internal working material, not automatically user-facing documentation.
+- `.notes/` may contain local planning or investigation notes. Treat these as internal working material, not automatically user-facing documentation.
 
-Keep generic behavior generic. URL normalization, authentication header
-handling, request execution, and general response helpers belong in transport
-code. Service routes, service models, compatibility behavior, and
-service-specific exceptions belong under the corresponding service package.
+Keep generic behavior generic. URL normalization, authentication header handling, request execution, and general response helpers belong in transport code. Service routes, service models, compatibility behavior, and service-specific exceptions belong under the corresponding service package.
 
-When a workflow becomes normal user behavior, prefer adding a resource method
-over repeating low-level URL construction in notebooks or application code.
+When a workflow becomes normal user behavior, prefer adding a resource method over repeating low-level URL construction in notebooks or application code.
 
 ## Development And Validation
 
@@ -676,7 +575,4 @@ Run tests:
 pytest -q
 ```
 
-`docs/README.md` is the package README and is loaded by
-`tests/integration/test_readme.py` as a doctest file. Keep README examples either
-simple enough to execute locally or formatted as illustrative fenced code blocks
-without doctest prompts when they require external services.
+`docs/README.md` is the package README and is loaded by `tests/integration/test_readme.py` as a doctest file. Keep README examples either simple enough to execute locally or formatted as illustrative fenced code blocks without doctest prompts when they require external services.
