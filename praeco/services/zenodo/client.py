@@ -8,11 +8,12 @@ from praeco.http_client import HttpClient
 from praeco.services.zenodo.depositions import DepositionsResource
 from praeco.services.zenodo.files import FilesResource
 from praeco.services.zenodo.licenses import LicensesResource
+from praeco.services.zenodo.records import RecordsResource
 from praeco.transport.url import normalize_base_url
 
 
 class ZenodoClient(HttpClient):
-    """Client for Zenodo depositions, files, and metadata helpers."""
+    """Client for Zenodo depositions, records, files, and metadata helpers."""
 
     def __init__(
         self,
@@ -44,3 +45,4 @@ class ZenodoClient(HttpClient):
         self.depositions: DepositionsResource = DepositionsResource(self)
         self.files: FilesResource = FilesResource(self)
         self.licenses: LicensesResource = LicensesResource(self)
+        self.records: RecordsResource = RecordsResource(self)
