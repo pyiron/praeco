@@ -910,6 +910,19 @@ class TestRecordFilesLocalPathChecks(_TempDirTestCase):
         self.assertEqual(paths, [self.root / "link" / "b.txt"])
         self.assertEqual((self.root / "real" / "b.txt").read_bytes(), b"xyz")
 
+    def test_keys_aliased_through_a_symlink_collide(self):
+        (self.root / "real").mkdir()
+        self.symlink(self.root / "link", self.root / "real")
+
+        for keys in (
+            ["real/a.txt", "link/a.txt"],
+            ["link/sub/x.txt", "real/sub"],
+        ):
+            for overwrite in (False, True):
+                self.assert_rejected_before_content(
+                    keys, ValidationError, overwrite=overwrite
+                )
+
     def test_dangling_symlink_at_target_counts_as_existing(self):
         destination = self.root / "missing"
         self.symlink(self.root / "a.txt", destination)
