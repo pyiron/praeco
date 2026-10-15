@@ -12,6 +12,7 @@ from praeco.services.zenodo.exceptions import (
     ZenodoPermissionError,
 )
 from praeco.services.zenodo.models import DepositionInfo
+from praeco.services.zenodo.records import _target_paths
 
 from ._helpers import FakeResponse, FakeSession, deposition_payload
 
@@ -736,6 +737,166 @@ class TestRecordFilesDownloadAll(_TempDirTestCase):
             c.records.files.download_all(RECORD_ID, directory=self.root)
 
         self.assertEqual(tree(self.root), ["a.txt"])
+
+
+class TestRecordFilesLocalPathChecks(_TempDirTestCase):
+    """Colliding keys and blocked local paths are rejected up front.
+
+    `download` with explicit names makes no request at all; `download_all`
+    makes only the listing request.
+    """
+
+    def symlink(self, link: Path, destination: Path) -> None:
+        try:
+            link.symlink_to(destination)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"symlinks unavailable: {exc}")
+
+    def assert_rejected_before_content(
+        self,
+        keys: list[str],
+        error: type[Exception],
+        *,
+        directory: Path | None = None,
+        overwrite: bool = False,
+    ) -> None:
+        directory = self.root if directory is None else directory
+        before = tree(self.root)
+
+        with self.subTest(api="download", keys=keys, overwrite=overwrite):
+            c, session = make_client([])
+
+            with self.assertRaises(error):
+                c.records.files.download(
+                    RECORD_ID, keys, directory=directory, overwrite=overwrite
+                )
+
+            self.assertEqual(session.calls, [])
+            self.assertEqual(tree(self.root), before)
+
+        with self.subTest(api="download_all", keys=keys, overwrite=overwrite):
+            c, session = make_client([listing(*(file_entry(key) for key in keys))])
+
+            with self.assertRaises(error):
+                c.records.files.download_all(
+                    RECORD_ID, directory=directory, overwrite=overwrite
+                )
+
+            self.assertEqual([call["url"] for call in session.calls], [FILES_URL])
+            self.assertEqual(tree(self.root), before)
+
+    def test_keys_naming_the_same_or_nested_paths_collide(self):
+        pairs = [
+            ["x/y", "x//y"],
+            ["x/./y", "x/y"],
+            ["a/", "a"],
+            ["a", "a/b"],
+            ["a/b", "a"],
+            ["a/b/c", "a"],
+        ]
+        for keys in pairs:
+            for overwrite in (False, True):
+                self.assert_rejected_before_content(
+                    keys, ValidationError, overwrite=overwrite
+                )
+
+    def test_collision_is_reported_before_existing_targets(self):
+        _ = (self.root / "a").write_bytes(b"original")
+
+        self.assert_rejected_before_content(["a", "a/b"], ValidationError)
+        self.assertEqual((self.root / "a").read_bytes(), b"original")
+
+    def test_keys_differing_only_in_case_do_not_collide(self):
+        keys = ["A.txt", "a.txt", "Dir/x", "dir/x/y"]
+
+        targets = _target_paths(self.root, keys, overwrite=False)
+
+        self.assertEqual(targets, [self.root / key for key in keys])
+
+    def test_directory_that_is_a_file_blocks_downloads(self):
+        blocker = self.root / "blocker"
+        _ = blocker.write_bytes(b"not a directory")
+        for overwrite in (False, True):
+            self.assert_rejected_before_content(
+                ["a.txt"], FileExistsError, directory=blocker, overwrite=overwrite
+            )
+        self.assertEqual(blocker.read_bytes(), b"not a directory")
+
+    def test_existing_directory_at_target_blocks_downloads(self):
+        (self.root / "a.txt").mkdir()
+        for overwrite in (False, True):
+            self.assert_rejected_before_content(
+                ["b.txt", "a.txt"], FileExistsError, overwrite=overwrite
+            )
+        self.assertTrue((self.root / "a.txt").is_dir())
+
+    def test_file_at_ancestor_blocks_downloads(self):
+        _ = (self.root / "sub").write_bytes(b"not a directory")
+        for keys in (["sub/a.txt"], ["ok.txt", "sub/deeper/a.txt"]):
+            for overwrite in (False, True):
+                self.assert_rejected_before_content(
+                    keys, FileExistsError, overwrite=overwrite
+                )
+        self.assertEqual((self.root / "sub").read_bytes(), b"not a directory")
+
+    def test_dangling_symlink_at_ancestor_blocks_downloads(self):
+        destination = self.root / "missing"
+        self.symlink(self.root / "sub", destination)
+        for overwrite in (False, True):
+            self.assert_rejected_before_content(
+                ["sub/a.txt"], FileExistsError, overwrite=overwrite
+            )
+        self.assertFalse(os.path.lexists(destination))
+
+    def test_symlink_to_file_at_ancestor_blocks_downloads(self):
+        _ = (self.root / "file.txt").write_bytes(b"data")
+        self.symlink(self.root / "sub", self.root / "file.txt")
+        for overwrite in (False, True):
+            self.assert_rejected_before_content(
+                ["sub/a.txt"], FileExistsError, overwrite=overwrite
+            )
+        self.assertEqual((self.root / "file.txt").read_bytes(), b"data")
+
+    def test_symlink_to_directory_inside_directory_is_allowed_as_ancestor(self):
+        (self.root / "real").mkdir()
+        self.symlink(self.root / "link", self.root / "real")
+
+        c, session = make_client([listing(file_entry("link/a.txt")), body(b"abc")])
+        paths = c.records.files.download(RECORD_ID, "link/a.txt", directory=self.root)
+
+        self.assertEqual(paths, [self.root / "link" / "a.txt"])
+        self.assertEqual((self.root / "real" / "a.txt").read_bytes(), b"abc")
+        self.assertEqual(len(session.calls), 2)
+
+        c, _ = make_client([listing(file_entry("link/b.txt")), body(b"xyz")])
+        paths = c.records.files.download_all(RECORD_ID, directory=self.root)
+
+        self.assertEqual(paths, [self.root / "link" / "b.txt"])
+        self.assertEqual((self.root / "real" / "b.txt").read_bytes(), b"xyz")
+
+    def test_dangling_symlink_at_target_counts_as_existing(self):
+        destination = self.root / "missing"
+        self.symlink(self.root / "a.txt", destination)
+
+        self.assert_rejected_before_content(["a.txt"], FileExistsError)
+
+        self.assertTrue((self.root / "a.txt").is_symlink())
+        self.assertFalse(os.path.lexists(destination))
+
+    def test_overwrite_replaces_dangling_symlink_at_target(self):
+        destination = self.root / "missing"
+        link = self.root / "a.txt"
+        self.symlink(link, destination)
+        c, _ = make_client([listing(file_entry("a.txt")), body(b"abc")])
+
+        paths = c.records.files.download(
+            RECORD_ID, "a.txt", directory=self.root, overwrite=True
+        )
+
+        self.assertEqual(paths, [link])
+        self.assertFalse(link.is_symlink())
+        self.assertEqual(link.read_bytes(), b"abc")
+        self.assertFalse(os.path.lexists(destination))
 
 
 if __name__ == "__main__":
