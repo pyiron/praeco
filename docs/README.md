@@ -386,8 +386,12 @@ from praeco import ZenodoClient
 client = ZenodoClient()
 
 names = client.records.files.list(1234567)
-paths = client.records.files.download(1234567, names[0], directory="downloads")
-paths = client.records.files.download_all(1234567, directory="downloads")
+
+# Download selected files ...
+paths = client.records.files.download(1234567, names[0], directory="selected")
+
+# ... or all of them.
+all_paths = client.records.files.download_all(1234567, directory="all-files")
 ```
 
 `list()` returns the file keys in the order Zenodo reports them. `download()` accepts one key or a sequence of keys, which must match `list()` exactly; unknown or duplicate keys raise `ValidationError` before any file is downloaded. Both download methods return the written paths, `Path(directory) / key`, in the order requested; `download_all()` follows the order of `list()`.
@@ -395,6 +399,8 @@ paths = client.records.files.download_all(1234567, directory="downloads")
 With a token, the same calls read the files of your own unpublished drafts and edit drafts when you pass `draft=True`. A `DepositionInfo` can be passed in place of the record id:
 
 ```python
+import os
+
 client = ZenodoClient(sandbox=True, token=os.environ["ZENODO_SANDBOX_TOKEN"])
 draft = client.depositions.create()  # or any DepositionInfo of your own drafts
 
@@ -410,7 +416,7 @@ draft_paths = client.records.files.download_all(
 
 Each file is streamed to a temporary file next to its target and checked against the size and MD5 checksum reported by Zenodo before it is moved into place, so a failed or mismatched download leaves no partial file behind. Mismatches raise `ValidationError`. Files completed earlier in the same call are kept.
 
-Keys that contain `/` are written to matching subdirectories of `directory`, which are created as needed. Keys that are empty, absolute, contain `..`, or would resolve outside `directory` are rejected with `ValidationError`.
+Keys that contain `/` are written to matching subdirectories of `directory`, which are created as needed. Keys that are empty, absolute, contain a `..` path component, or would resolve outside `directory` are rejected with `ValidationError`.
 
 Existing files are not replaced by default: if any target already exists, `FileExistsError` is raised before anything is downloaded. Pass `overwrite=True` to replace existing files.
 
