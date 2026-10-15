@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import re
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import TYPE_CHECKING, Any, TypeAlias, cast
@@ -245,7 +245,7 @@ def _target_paths(
     targets when `overwrite` is False (`FileExistsError`).
     """
     targets = [_safe_target_path(directory, key) for key in keys]
-    _check_no_target_collisions(keys)
+    _check_no_target_collisions(keys, targets)
     _check_no_local_conflicts(directory, targets)
     if not overwrite:
         existing = [target for target in targets if os.path.lexists(target)]
@@ -256,17 +256,36 @@ def _target_paths(
     return targets
 
 
-def _check_no_target_collisions(keys: Sequence[str]) -> None:
-    """Reject keys whose normalized targets are equal or nested.
+def _check_no_target_collisions(keys: Sequence[str], targets: Sequence[Path]) -> None:
+    """Reject keys whose targets are equal or nested.
 
     Keys such as ``"x/y"`` and ``"x//y"`` name the same local file, and a key
     such as ``"a"`` cannot be both a file and the parent directory of
-    ``"a/b"``. Case is not folded.
+    ``"a/b"``. Keys are compared lexically, then by their resolved parent
+    directories, so a symlink inside the directory cannot alias two keys. The
+    final component stays unresolved because a target symlink is replaced,
+    not followed. Case is not folded.
     """
+    collisions = _colliding_keys(
+        (key, Path(os.path.normpath(key)).parts) for key in keys
+    ) or _colliding_keys(
+        # Resolved twice for the reason given in `_safe_target_path`.
+        (key, (target.parent.resolve().resolve() / target.name).parts)
+        for key, target in zip(keys, targets, strict=True)
+    )
+    if collisions:
+        raise ValidationError(
+            f"file keys map to the same or nested local paths: {collisions}"
+        )
+
+
+def _colliding_keys(
+    keyed_parts: Iterable[tuple[str, tuple[str, ...]]],
+) -> list[tuple[str, str]]:
+    """Return key pairs whose path parts are equal or nested."""
     first_key: dict[tuple[str, ...], str] = {}
     collisions: list[tuple[str, str]] = []
-    for key in keys:
-        parts = Path(os.path.normpath(key)).parts
+    for key, parts in keyed_parts:
         if parts in first_key:
             collisions.append((first_key[parts], key))
         else:
@@ -276,10 +295,7 @@ def _check_no_target_collisions(keys: Sequence[str]) -> None:
             ancestor_key = first_key.get(parts[:depth])
             if ancestor_key is not None:
                 collisions.append((ancestor_key, key))
-    if collisions:
-        raise ValidationError(
-            f"file keys map to the same or nested local paths: {collisions}"
-        )
+    return collisions
 
 
 def _check_no_local_conflicts(directory: str | Path, targets: Sequence[Path]) -> None:
