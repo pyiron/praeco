@@ -18,6 +18,8 @@ class TestZenodoClientInit(unittest.TestCase):
         self.assertIs(c.depositions.client, c)
         self.assertIs(c.files.client, c)
         self.assertIs(c.licenses.client, c)
+        self.assertIs(c.records.client, c)
+        self.assertIs(c.records.files.client, c)
 
     def test_sandbox_address_is_used_when_requested(self):
         c = ZenodoClient(sandbox=True, session=cast(Any, FakeSession()))
