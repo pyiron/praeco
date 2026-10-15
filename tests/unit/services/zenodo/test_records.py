@@ -518,6 +518,42 @@ class TestRecordFilesDownload(_TempDirTestCase):
         self.assertEqual(tree(self.root), [])
         self.assertTrue(content.closed)
 
+    def test_invalid_listed_sizes_skip_size_verification(self):
+        # None of these is a usable byte count for the six-byte body; if any
+        # were compared, the download would fail with a size mismatch.
+        for size in [True, False, -6, "6", "999", None]:
+            with self.subTest(size=size), TemporaryDirectory() as tmp:
+                entry = file_entry("a.txt")
+                entry["size"] = size
+                c, _ = make_client([listing(entry), body(b"abcdef")])
+
+                paths = c.records.files.download(RECORD_ID, "a.txt", directory=tmp)
+
+                self.assertEqual(paths, [Path(tmp) / "a.txt"])
+                self.assertEqual((Path(tmp) / "a.txt").read_bytes(), b"abcdef")
+
+    def test_unsafe_keys_of_unrequested_entries_are_ignored(self):
+        c, session = make_client(
+            [
+                listing(
+                    file_entry("../evil"),
+                    file_entry("good.txt"),
+                    file_entry("/etc/passwd"),
+                ),
+                body(b"good"),
+            ]
+        )
+
+        paths = c.records.files.download(RECORD_ID, ["good.txt"], directory=self.root)
+
+        self.assertEqual(paths, [self.root / "good.txt"])
+        self.assertEqual((self.root / "good.txt").read_bytes(), b"good")
+        self.assertEqual(tree(self.root), ["good.txt"])
+        self.assertEqual(
+            [call["url"] for call in session.calls],
+            [FILES_URL, content_url("good.txt")],
+        )
+
     def test_listing_http_errors_map_to_zenodo_exceptions(self):
         for status_code, error_cls in HTTP_ERRORS:
             with self.subTest(status_code=status_code):
