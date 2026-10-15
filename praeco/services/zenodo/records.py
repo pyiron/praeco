@@ -317,8 +317,12 @@ def _safe_target_path(directory: str | Path, key: str) -> Path:
 
     base = Path(directory)
     target = base / key
-    resolved_base = base.resolve()
-    resolved_target = target.resolve()
+    # On Windows, resolve() returns a dangling symlink's stored target without
+    # canonicalizing it; a second resolve() canonicalizes its existing prefix
+    # (for example 8.3 short names) so both sides compare alike. On POSIX the
+    # second call is a no-op.
+    resolved_base = base.resolve().resolve()
+    resolved_target = target.resolve().resolve()
     if resolved_target == resolved_base or not resolved_target.is_relative_to(
         resolved_base
     ):
