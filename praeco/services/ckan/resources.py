@@ -118,8 +118,6 @@ class ResourcesResource:
             for resource in self.client.packages.show(package).resources
             if resource.raw.get("url_type") == "upload"
         ]
-        if not uploads:
-            return []
         urls = [content_url(resource) for resource in uploads]
         names = [
             default_file_name(resource, url)
