@@ -148,20 +148,42 @@ def check_unique_names(
         )
 
 
-def target_paths(
+def safe_target_path(directory: str | Path, name: str) -> Path:
+    """Return ``Path(directory) / name`` if it resolves inside `directory`.
+
+    A target that resolves outside `directory` or to `directory` itself, for
+    example through a symlink at the target, raises `ValidationError`.
+    """
+    base = Path(directory)
+    target = base / name
+    # On Windows, resolve() returns a dangling symlink's stored target without
+    # canonicalizing it; a second resolve() canonicalizes its existing prefix
+    # (for example 8.3 short names) so both sides compare alike. On POSIX the
+    # second call is a no-op.
+    resolved_base = base.resolve().resolve()
+    resolved_target = target.resolve().resolve()
+    if resolved_target == resolved_base or not resolved_target.is_relative_to(
+        resolved_base
+    ):
+        raise ValidationError(
+            f"file name must name a path inside the directory: {name!r}"
+        )
+    return target
+
+
+def check_local_conflicts(
     directory: str | Path,
-    names: Sequence[str],
+    targets: Sequence[Path],
     *,
     overwrite: bool,
-) -> list[Path]:
-    """Map safe file names to target paths, rejecting local problems up front.
+) -> None:
+    """Reject local paths that would prevent writing the targets.
 
     `FileExistsError` is raised first for local paths that block a target
     regardless of `overwrite` (`directory` is not a directory, or a target is
     a directory), then for existing targets when `overwrite` is False.
     """
     base = Path(directory)
-    targets = [base / name for name in names]
     blocking: list[Path] = []
     if os.path.lexists(base) and not base.is_dir():
         blocking.append(base)
@@ -176,7 +198,6 @@ def target_paths(
             raise FileExistsError(
                 f"target files already exist: {[str(path) for path in existing]}"
             )
-    return targets
 
 
 def expected_size(resource: CkanResourceInfo) -> int | None:

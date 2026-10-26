@@ -10,12 +10,13 @@ from typing import TYPE_CHECKING, Any
 from praeco.exceptions import ValidationError
 from praeco.services.ckan._download import (
     check_file_name,
+    check_local_conflicts,
     check_unique_names,
     content_url,
     default_file_name,
     expected_size,
     open_content,
-    target_paths,
+    safe_target_path,
 )
 from praeco.services.ckan.models import CkanPackageInfo, CkanResourceInfo
 from praeco.transport.download import write_response_to_path
@@ -96,7 +97,8 @@ class ResourcesResource:
         info = self.show(resource)
         url = content_url(info)
         name = filename if filename is not None else default_file_name(info, url)
-        [target] = target_paths(directory, [name], overwrite=overwrite)
+        target = safe_target_path(directory, name)
+        check_local_conflicts(directory, [target], overwrite=overwrite)
         return self._write_content(info, url, target, overwrite=overwrite)
 
     def download_all(
@@ -123,8 +125,9 @@ class ResourcesResource:
             default_file_name(resource, url)
             for resource, url in zip(uploads, urls, strict=True)
         ]
+        targets = [safe_target_path(directory, name) for name in names]
         check_unique_names(uploads, names)
-        targets = target_paths(directory, names, overwrite=overwrite)
+        check_local_conflicts(directory, targets, overwrite=overwrite)
         return [
             self._write_content(resource, url, target, overwrite=overwrite)
             for resource, url, target in zip(uploads, urls, targets, strict=True)
