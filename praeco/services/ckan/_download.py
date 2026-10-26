@@ -129,7 +129,8 @@ def default_file_name(resource: CkanResourceInfo, url: str) -> str:
     if is_safe_file_name(resource.id):
         return resource.id
     raise ValidationError(
-        f"resource {resource.id!r} has no safe local file name; pass filename="
+        f"resource {resource.id!r} has no safe local file name; download it "
+        f"with download(..., filename=...)"
     )
 
 
