@@ -251,6 +251,33 @@ result = client.sparql.query_json(
 )
 ```
 
+#### Downloading Assets
+
+`client.assets.download()` writes the content of one asset to a local file, and `client.assets.download_all()` writes the uploaded assets of a dataset. Both accept an id or a model:
+
+```python
+# Download one asset ...
+path = client.assets.download(asset, directory="downloads")
+
+# ... under a name of your choice ...
+renamed = client.assets.download(asset, directory="downloads", filename="copy.ttl")
+
+# ... or every uploaded asset of the dataset.
+paths = client.assets.download_all(dataset, directory="all-assets")
+```
+
+`download()` always fetches the asset's current metadata first, also when given a `DataportalAssetInfo`, and then streams the content from the asset's `url`. That URL must be an absolute HTTP(S) URL; otherwise `ValidationError` is raised before any content is requested. `download_all()` fetches the dataset once and downloads only uploaded assets (`url_type` `"upload"`), one at a time in the order the Dataportal reports them. Link assets, which point to an external URL, are skipped; download them one by one with `download()`. Without uploaded assets, `download_all()` returns an empty list. Both methods return the written paths, `Path(directory) / name`, and create a missing `directory`.
+
+The API token is sent only to the client's own address: the same scheme, host, and port (a missing port means 80 for `http` and 443 for `https`). Content from any other URL, such as an external link asset, is downloaded without the token, and `requests` drops the token when a redirect leads to another host. As a consequence, if the asset URLs name the Dataportal under another address than the client's, for example another alias of the host or `http` instead of `https`, the token is not sent and a private asset fails with the server's error. A response status of 400 or higher raises `CkanApiError`.
+
+By default, a file is named after the last segment of the URL path, percent-decoded, for example `dataset.ttl` for `.../download/dataset.ttl`. If that segment is empty or unsafe, the asset id is used instead, without a warning. Pass `filename=` to `download()` to choose the name yourself; it is used as given, and an unsafe name raises `ValidationError` before any request. A safe name is a single file name that works on every platform: not empty, `.` or `..`; none of `/ \ : * ? " < > |` and no control characters; no trailing dot or space; not a Windows device name such as `CON`, `NUL`, `COM1` or `LPT1`, also with an extension (`con.txt`); and at most 255 bytes in UTF-8. These rules apply on every operating system.
+
+Each file is streamed to a temporary file next to its target and moved into place only when complete. For uploaded assets, the received size is checked against the asset's `size`, and a mismatch raises `ValidationError` and leaves no file behind. Link assets are not size-checked, because their `size` is entered by hand. No checksum is verified.
+
+Existing files are not replaced by default: if a target already exists, `FileExistsError` is raised before anything is downloaded. Pass `overwrite=True` to replace existing files. A `directory` that exists but is not a directory, or an existing directory at a target path, raises `FileExistsError` even with `overwrite=True`. In `download_all()`, uploaded assets whose file names coincide raise `ValidationError` naming the asset ids, before anything is downloaded; on case-insensitive filesystems, names that differ only in case refer to the same local file and are not detected. If a download fails partway through `download_all()`, the files completed earlier are kept.
+
+The same methods exist on the internal CKAN layer as `client.resources.download(resource, ...)` and `client.resources.download_all(package, ...)`; the asset methods delegate to them.
+
 #### More Information
 
 Creating datasets and starting Fuseki updates require suitable permissions for the selected organization. Use disposable private datasets when validating write workflows against the live deployment, and clean them up afterwards.
