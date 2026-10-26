@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 
 _DEFAULT_PORTS = {"http": 80, "https": 443}
 _UNSAFE_CHARACTERS = re.compile(r'[/\\:*?"<>|\x00-\x1f\x7f]')
+_UNSAFE_URL_CHARACTERS = re.compile(r"[\\\x00-\x1f\x7f]")
 _RESERVED_NAMES = frozenset(
     ["CON", "PRN", "AUX", "NUL"]
     + [f"COM{digit}" for digit in range(1, 10)]
@@ -32,20 +33,19 @@ _DECIMAL_DIGITS = re.compile(r"[0-9]+")
 def content_url(resource: CkanResourceInfo) -> str:
     """Return the resource's content URL if it is an absolute HTTP(S) URL.
 
-    The URL needs a host and a parsable port; otherwise `ValidationError` is
-    raised.
+    The URL must not contain a backslash or control characters, and as
+    `requests` prepares it, it needs an HTTP(S) scheme, a host and a valid
+    port; otherwise `ValidationError` is raised. The URL is returned as given.
     """
     url = resource.url
     if url is None:
         raise ValidationError(f"resource {resource.id!r} has no content URL")
-    parts = urlsplit(url)
-    try:
-        _ = parts.port
-    except ValueError:
-        valid = False
-    else:
-        valid = parts.scheme.lower() in _DEFAULT_PORTS and bool(parts.hostname)
-    if not valid:
+    if _UNSAFE_URL_CHARACTERS.search(url):
+        raise ValidationError(
+            f"resource {resource.id!r} content URL must not contain a backslash "
+            f"or control characters: {url!r}"
+        )
+    if _origin(url) is None:
         raise ValidationError(
             f"resource {resource.id!r} content URL must be an absolute HTTP(S) "
             f"URL: {url!r}"
@@ -56,23 +56,34 @@ def content_url(resource: CkanResourceInfo) -> str:
 def sends_token(url: str, base_url: str) -> bool:
     """Return whether `url` has the same origin as `base_url`.
 
-    Scheme and host are compared lower-case, and a missing port means the
-    scheme's default port. A URL whose origin cannot be determined never
-    matches.
+    Both origins are taken from the URLs as `requests` prepares them, which is
+    what it connects to. Scheme and host are compared lower-case, and a
+    missing port means the scheme's default port. A URL whose origin cannot
+    be determined never matches.
     """
     url_origin = _origin(url)
     return url_origin is not None and url_origin == _origin(base_url)
 
 
 def _origin(url: str) -> tuple[str, str, int] | None:
-    parts = urlsplit(url)
-    scheme = parts.scheme.lower()
-    host = parts.hostname
-    if scheme not in _DEFAULT_PORTS or not host:
-        return None
+    """Return the scheme, host and port of `url` as `requests` prepares it.
+
+    `urlsplit` alone can disagree with the host `requests` connects to, for
+    example on a backslash before an ``@``. The netloc of the prepared URL is
+    rebuilt from urllib3's own components, so both agree on it. None means
+    the origin cannot be determined.
+    """
+    prepared = requests.PreparedRequest()
     try:
+        prepared.prepare_url(url, None)
+        # A successful prepare_url always sets url; "" only satisfies typing.
+        parts = urlsplit(prepared.url or "")
+        scheme = parts.scheme.lower()
+        host = parts.hostname
         port = parts.port
-    except ValueError:
+    except (requests.exceptions.RequestException, ValueError):
+        return None
+    if scheme not in _DEFAULT_PORTS or not host:
         return None
     return scheme, host.lower(), _DEFAULT_PORTS[scheme] if port is None else port
 
