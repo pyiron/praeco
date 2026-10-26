@@ -174,8 +174,15 @@ def safe_target_path(directory: str | Path, name: str) -> Path:
     # canonicalizing it; a second resolve() canonicalizes its existing prefix
     # (for example 8.3 short names) so both sides compare alike. On POSIX the
     # second call is a no-op.
-    resolved_base = base.resolve().resolve()
-    resolved_target = target.resolve().resolve()
+    try:
+        resolved_base = base.resolve().resolve()
+        resolved_target = target.resolve().resolve()
+    except RuntimeError:
+        # Python 3.11 and 3.12 raise RuntimeError for a symlink loop. Python
+        # 3.13's non-strict resolve() does not, and the looped path then
+        # counts as inside; leave the decision to `check_local_conflicts`, as
+        # on 3.13.
+        return target
     if resolved_target == resolved_base or not resolved_target.is_relative_to(
         resolved_base
     ):
