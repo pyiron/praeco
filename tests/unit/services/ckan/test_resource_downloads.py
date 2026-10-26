@@ -1096,6 +1096,162 @@ class TestLocalChecks(_TempDirTestCase):
         self.assertEqual(session.calls, [])
 
 
+class TestTargetContainment(_TempDirTestCase):
+    """R1-10: targets must resolve inside `directory`, as in Zenodo.
+
+    Symlink loops are not tested: `Path.resolve` raises on them on Python
+    3.11 and 3.12, but not on 3.13.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.directory = self.root / "dir"
+        self.directory.mkdir()
+        self.outside = self.root / "outside.txt"
+        self.outside.write_text("outside")
+        self.symlink(self.root / "probe", self.outside)
+        (self.root / "probe").unlink()
+
+    def link(self, name: str, destination: Path) -> Path:
+        link = self.directory / name
+        if os.path.lexists(link):
+            link.unlink()
+        link.symlink_to(destination, target_is_directory=destination.is_dir())
+        self.addCleanup(lambda: link.unlink() if os.path.lexists(link) else None)
+        return link
+
+    def assert_outside_untouched(self) -> None:
+        self.assertEqual(self.outside.read_text(), "outside")
+        self.assertEqual(
+            sorted(p.name for p in self.root.iterdir()), ["dir", "outside.txt"]
+        )
+
+    def test_target_resolving_outside_or_to_directory_raises(self):
+        destinations = {
+            "outside file": self.outside,
+            "outside, dangling": self.root / "missing.txt",
+            "directory itself": self.directory,
+            "parent of directory": self.root,
+        }
+        for label, destination in destinations.items():
+            for method in ("download", "download_all"):
+                for overwrite in (False, True):
+                    with self.subTest(case=label, method=method, overwrite=overwrite):
+                        link = self.link("data.ttl", destination)
+                        payload = resource()
+                        if method == "download_all":
+                            payload = package(payload)
+                        c, session = make_client([action(payload), content(b"new")])
+
+                        with self.assertRaises(ValidationError):
+                            getattr(c.resources, method)(
+                                "x", directory=self.directory, overwrite=overwrite
+                            )
+
+                        self.assertEqual(len(session.calls), 1)
+                        self.assertTrue(link.is_symlink())
+                        self.assertEqual(Path(os.readlink(link)).name, destination.name)
+                        self.assert_outside_untouched()
+                        link.unlink()
+
+    def test_target_resolving_inside_keeps_the_existing_rules(self):
+        real = self.directory / "real.ttl"
+        real.write_text("real")
+        destinations = {
+            "existing": real,
+            "dangling": self.directory / "missing.ttl",
+        }
+        for label, destination in destinations.items():
+            with self.subTest(case=label, overwrite=False):
+                link = self.link("data.ttl", destination)
+                c, session = make_client([action(resource())])
+
+                with self.assertRaises(FileExistsError):
+                    c.resources.download("res-1", directory=self.directory)
+
+                self.assertEqual(len(session.calls), 1)
+                self.assertTrue(link.is_symlink())
+                link.unlink()
+            with self.subTest(case=label, overwrite=True):
+                link = self.link("data.ttl", destination)
+                c, _ = make_client([action(resource()), content(b"new")])
+
+                path = c.resources.download(
+                    "res-1", directory=self.directory, overwrite=True
+                )
+
+                # The link itself is replaced; the file it named is untouched.
+                self.assertEqual(path, link)
+                self.assertFalse(path.is_symlink())
+                self.assertEqual(path.read_bytes(), b"new")
+                self.assertEqual(real.read_text(), "real")
+                self.assertFalse((self.directory / "missing.ttl").exists())
+                path.unlink()
+
+    def test_symlinked_directory_is_accepted(self):
+        alias = self.root / "alias"
+        alias.symlink_to(self.directory, target_is_directory=True)
+        self.addCleanup(alias.unlink)
+        c, _ = make_client([action(resource()), content(b"abc")])
+
+        path = c.resources.download("res-1", directory=alias)
+
+        self.assertEqual(path, alias / "data.ttl")
+        self.assertEqual((self.directory / "data.ttl").read_bytes(), b"abc")
+
+    def test_containment_comes_before_duplicate_names(self):
+        _ = self.link("evil.ttl", self.outside)
+        resources = [
+            resource("res-1", url=upload_url("data.ttl")),
+            resource("res-2", url="https://files.example.test/data.ttl"),
+            resource("res-3", url=upload_url("evil.ttl")),
+        ]
+        c, session = make_client([action(package(*resources))])
+
+        with self.assertRaises(ValidationError) as caught:
+            c.resources.download_all("pkg-1", directory=self.directory)
+
+        self.assertIn("evil.ttl", str(caught.exception))
+        self.assertNotIn("res-2", str(caught.exception))
+        self.assertEqual(len(session.calls), 1)
+
+    def test_containment_comes_before_file_exists_errors(self):
+        _ = self.link("evil.ttl", self.outside)
+        (self.directory / "data.ttl").write_text("old")
+        (self.directory / "blocked.ttl").mkdir()
+        resources = [
+            resource("res-1", url=upload_url("data.ttl")),
+            resource("res-2", url=upload_url("blocked.ttl")),
+            resource("res-3", url=upload_url("evil.ttl")),
+        ]
+        for overwrite in (False, True):
+            with self.subTest(overwrite=overwrite):
+                c, session = make_client([action(package(*resources))])
+
+                with self.assertRaises(ValidationError):
+                    c.resources.download_all(
+                        "pkg-1", directory=self.directory, overwrite=overwrite
+                    )
+
+                self.assertEqual(len(session.calls), 1)
+                self.assertEqual((self.directory / "data.ttl").read_text(), "old")
+
+    def test_download_all_checks_every_target_before_the_first_content_request(self):
+        _ = self.link("evil.ttl", self.root / "missing.txt")
+        resources = [
+            resource("res-1", url=upload_url("a.ttl")),
+            resource("res-2", url=upload_url("evil.ttl")),
+        ]
+        c, session = make_client([action(package(*resources)), content(b"A")])
+
+        with self.assertRaises(ValidationError):
+            c.resources.download_all("pkg-1", directory=self.directory)
+
+        self.assertEqual(len(session.calls), 1)
+        self.assertFalse((self.directory / "a.ttl").exists())
+        self.assert_outside_untouched()
+
+
 class TestSizeCheck(_TempDirTestCase):
     """Criterion 7: the size of uploads is checked (D4)."""
 
