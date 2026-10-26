@@ -12,6 +12,8 @@ jobs:
     uses: pyiron/actions/.github/workflows/push-pull.yml@actions-4.3.0
     secrets: inherit
     with:
+      # Pin until conda-forge/miniforge#913 is fixed: 26.9.4-0 breaks conda init on Windows
+      miniforge-version: '26.7.2-1'
       do-coveralls: false
       do-codecov: true
       do-mypy: true
