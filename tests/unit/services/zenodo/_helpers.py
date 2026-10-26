@@ -1,3 +1,4 @@
+from collections.abc import Iterator
 from typing import Any
 
 
@@ -16,6 +17,9 @@ class FakeResponse:
         json_value: Any = None,
         json_exc: Exception | None = None,
         request: FakeRequest | None = None,
+        body: bytes = b"",
+        chunks: list[bytes] | None = None,
+        stream_exc: Exception | None = None,
     ):
         self.url = url
         self.status_code = status_code
@@ -23,11 +27,34 @@ class FakeResponse:
         self._json_value = json_value
         self._json_exc = json_exc
         self.request = request
+        self._body = body
+        self._chunks = chunks
+        self._stream_exc = stream_exc
+        self.chunk_sizes: list[int] = []
+        self.closed = False
 
     def json(self) -> Any:
         if self._json_exc is not None:
             raise self._json_exc
         return self._json_value
+
+    def iter_content(self, chunk_size: int = 1) -> Iterator[bytes]:
+        """Yield `chunks` if given, else `body` split into `chunk_size` pieces.
+
+        If `stream_exc` is set, it is raised after the last chunk, simulating a
+        connection that breaks mid-stream.
+        """
+        self.chunk_sizes.append(chunk_size)
+        if self._chunks is not None:
+            yield from self._chunks
+        else:
+            for start in range(0, len(self._body), chunk_size):
+                yield self._body[start : start + chunk_size]
+        if self._stream_exc is not None:
+            raise self._stream_exc
+
+    def close(self) -> None:
+        self.closed = True
 
 
 class FakeSession:
