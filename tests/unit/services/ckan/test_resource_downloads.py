@@ -8,6 +8,7 @@ error handling.
 import contextlib
 import json
 import os
+import sys
 import unittest
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -882,17 +883,24 @@ class TestFileNames(_TempDirTestCase):
                 payload = resource(resource_id, url=upload_url("a%2Fb.ttl"))
                 c, session = make_client([action(payload)])
 
-                with self.assertRaises(ValidationError):
+                with self.assertRaises(ValidationError) as caught:
                     c.resources.download("res-1", directory=self.root)
 
+                self.assert_points_to_download_with_filename(caught.exception)
                 self.assertEqual(len(session.calls), 1)
                 c, session = make_client([action(package(payload))])
 
-                with self.assertRaises(ValidationError):
+                with self.assertRaises(ValidationError) as caught:
                     c.resources.download_all("pkg-1", directory=self.root)
 
+                self.assert_points_to_download_with_filename(caught.exception)
                 self.assertEqual(len(session.calls), 1)
                 self.assertEqual(tree(self.root), [])
+
+    def assert_points_to_download_with_filename(self, exc: Exception) -> None:
+        # R1-8: download_all has no filename=, so the advice names download.
+        self.assertIn("download(", str(exc))
+        self.assertIn("filename=", str(exc))
 
     def test_filename_replaces_unsafe_url_name_and_unsafe_id(self):
         payload = resource("CON", url=upload_url("a%2Fb.ttl"))
@@ -1176,6 +1184,42 @@ class TestSizeCheck(_TempDirTestCase):
                 path, _ = self.download(resource(size=size), b"ab")
 
                 self.assertEqual(path.read_bytes(), b"ab")
+
+    def test_digit_strings_that_int_rejects_skip_the_check(self):
+        # R1-6: Python's int() refuses strings longer than its digit limit.
+        limit = sys.get_int_max_str_digits()
+        if limit == 0:
+            self.skipTest("int() has no digit limit in this interpreter")
+        for method in ("download", "download_all"):
+            with self.subTest(method=method):
+                directory = self.fresh_directory()
+                payload = resource(size="1" * (limit + 1))
+                if method == "download_all":
+                    payload = package(payload)
+                response = content(b"ab")
+                c, session = make_client([action(payload), response])
+
+                result = getattr(c.resources, method)("x", directory=directory)
+
+                self.assertEqual((directory / "data.ttl").read_bytes(), b"ab")
+                self.assertIn(
+                    result, (directory / "data.ttl", [directory / "data.ttl"])
+                )
+                self.assertEqual(len(session.calls), 2)
+                self.assertTrue(response.closed)
+
+    def test_digit_strings_at_the_int_limit_are_checked(self):
+        limit = sys.get_int_max_str_digits()
+        if limit == 0:
+            self.skipTest("int() has no digit limit in this interpreter")
+        response = content(b"ab")
+        c, _ = make_client([action(resource(size="1" * limit)), response])
+
+        with self.assertRaises(ValidationError):
+            c.resources.download("res-1", directory=self.root)
+
+        self.assertEqual(tree(self.root), [])
+        self.assertTrue(response.closed)
 
     def test_md5_hash_is_not_checked(self):
         for checksum in ("0" * 32, "md5:" + "0" * 32, "sha256:" + "0" * 64):
