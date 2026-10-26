@@ -335,7 +335,31 @@ class TestDownloadRequests(_TempDirTestCase):
 
                     self.assertEqual(paths, [])
                     self.assertEqual(len(session.calls), 1)
-                    self.assertFalse((self.root / "a.ttl").exists())
+                    # Nothing is written, and a missing directory is not created.
+                    self.assertEqual(tree(self.root), [])
+
+    def test_download_all_without_uploads_still_rejects_a_file_as_directory(self):
+        file_path = self.root / "file.txt"
+        file_path.write_text("keep")
+        packages = {
+            "no resources": package(),
+            "links only": package(
+                resource("link-1", url="https://other.test/a.ttl", url_type="")
+            ),
+        }
+        for label, payload in packages.items():
+            for overwrite in (False, True):
+                with self.subTest(package=label, overwrite=overwrite):
+                    c, session = make_client([action(payload)])
+
+                    with self.assertRaises(FileExistsError):
+                        c.resources.download_all(
+                            "pkg-1", directory=file_path, overwrite=overwrite
+                        )
+
+                    self.assertEqual(len(session.calls), 1)
+                    self.assertEqual(tree(self.root), ["file.txt"])
+                    self.assertEqual(file_path.read_text(), "keep")
 
     def test_download_all_names_files_like_download(self):
         resources = [
