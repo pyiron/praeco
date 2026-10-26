@@ -12,6 +12,8 @@ jobs:
     uses: pyiron/actions/.github/workflows/push-pull.yml@actions-4.3.0
     secrets: inherit
     with:
+      # Miniforge installer for every job that builds a conda environment; pin a release here if latest breaks
+      miniforge-version: 'latest'
       do-coveralls: false
       do-codecov: true
       do-mypy: true
