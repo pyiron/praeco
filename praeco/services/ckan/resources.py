@@ -138,11 +138,13 @@ class ResourcesResource:
         *,
         overwrite: bool,
     ) -> Path:
+        # Read the size first, so nothing can fail while the response is open.
+        size = expected_size(resource)
         return write_response_to_path(
             open_content(self.client, url),
             target,
             overwrite=overwrite,
-            size=expected_size(resource),
+            size=size,
         )
 
     def _create_with_upload(

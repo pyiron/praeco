@@ -183,7 +183,7 @@ def expected_size(resource: CkanResourceInfo) -> int | None:
 
     Only resources with ``url_type == "upload"`` are checked, and only if
     their ``size`` is a non-negative int (not a bool) or a string of ASCII
-    decimal digits.
+    decimal digits that `int` accepts (Python limits the number of digits).
     """
     if resource.raw.get("url_type") != "upload":
         return None
@@ -191,7 +191,10 @@ def expected_size(resource: CkanResourceInfo) -> int | None:
     if isinstance(size, int) and not isinstance(size, bool) and size >= 0:
         return size
     if isinstance(size, str) and _DECIMAL_DIGITS.fullmatch(size):
-        return int(size)
+        try:
+            return int(size)
+        except ValueError:
+            return None
     return None
 
 
