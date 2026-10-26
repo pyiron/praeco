@@ -545,12 +545,18 @@ class TestTokenRule(_TempDirTestCase):
             ["Authorization" in r.headers for r in adapter.requests], [False, False]
         )
 
-    def test_base_url_or_content_url_with_unparsable_port_never_matches(self):
+    def test_origins_that_cannot_be_determined_never_match(self):
+        # The download validates content URLs first, so the URL cases are
+        # checked on the helper.
         cases = [
             ("https://ckan.test:abc", "https://ckan.test/data.ttl"),
             ("https://ckan.test:abc", "https://ckan.test:abc/data.ttl"),
             ("https://ckan.test:99999", "https://ckan.test:99999/data.ttl"),
             ("https://ckan.test", "https://ckan.test:abc/data.ttl"),
+            ("ftp://ckan.test", "ftp://ckan.test/data.ttl"),
+            ("https://ckan.test", "ftp://ckan.test/data.ttl"),
+            ("https://ckan.test", "https:///data.ttl"),
+            ("https://ckan.test", "/data.ttl"),
         ]
         for base_url, url in cases:
             with self.subTest(base_url=base_url, url=url):
@@ -647,6 +653,16 @@ class TestFileNames(_TempDirTestCase):
         for name in ("COM0", "LPT0", "com0.txt"):
             with self.subTest(name=name):
                 self.assertTrue(is_safe_file_name(name))
+
+    def test_filename_without_a_utf8_encoding_is_unsafe(self):
+        # A lone surrogate has no UTF-8 byte length, so it cannot meet the
+        # 255-byte rule.
+        c, session = make_client([action(resource()), content(b"abc")])
+
+        with self.assertRaises(ValidationError):
+            c.resources.download("res-1", directory=self.root, filename="a\ud800")
+
+        self.assertEqual(session.calls, [])
 
     def test_filename_overrides_the_url_name(self):
         c, _ = make_client([action(resource()), content(b"abc")])
