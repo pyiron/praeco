@@ -16,6 +16,7 @@ from typing import Any, cast
 from urllib.parse import quote
 
 import requests
+from urllib3.util import parse_url
 
 from praeco.exceptions import HttpError, ValidationError
 from praeco.services.ckan import CkanClient
@@ -419,6 +420,14 @@ def responder(
     return respond
 
 
+def connection_origin(url: str | None) -> tuple[str, str, int]:
+    """Return the scheme, host and port that urllib3 connects to for `url`."""
+    parts = parse_url(str(url))
+    scheme = (parts.scheme or "").lower()
+    port = parts.port if parts.port is not None else {"http": 80, "https": 443}[scheme]
+    return scheme, (parts.host or "").lower(), port
+
+
 class TestTokenRule(_TempDirTestCase):
     """Criterion 3, on a real `requests.Session` with a recording adapter."""
 
@@ -559,6 +568,70 @@ class TestTokenRule(_TempDirTestCase):
                 body = adapter.bodies[1]
                 self.assertTrue(body.released or body.closed)
 
+    def test_backslash_urls_raise_after_only_the_metadata_request(self):
+        # R1-1: urlsplit sees ckan.test as the host, requests connects to
+        # evil.example or to port 8443.
+        urls = [
+            "https://evil.example\\@ckan.test/x.ttl",
+            "https://ckan.test:8443\\@ckan.test/x.ttl",
+        ]
+        for url in urls:
+            for method in ("download", "download_all"):
+                with self.subTest(url=url, method=method):
+                    if method == "download":
+                        result = resource(url=url, url_type="")
+                    else:
+                        result = package(resource(url=url))
+                    session, adapter = recording_session(responder(result))
+                    c = CkanClient("ckan.test", api_token=TOKEN, session=session)
+                    directory = self.fresh_directory()
+
+                    with self.assertRaises(ValidationError):
+                        getattr(c.resources, method)("x", directory=directory)
+
+                    self.assertEqual([r.method for r in adapter.requests], ["POST"])
+                    self.assertEqual(tree(directory), [])
+
+    def test_token_follows_the_origin_requests_connects_to(self):
+        # Accepted URLs that parsers can read differently. The origin is
+        # taken from the request as requests prepared it, with urllib3's
+        # parser, which is what the connection uses.
+        cases = [
+            ("ckan.test", "https://evil.example#@ckan.test/x.ttl", False),
+            ("ckan.test", "https://evil.example?@ckan.test/x.ttl", False),
+            ("ckan.test", "https://evil.example%40ckan.test/x.ttl", False),
+            ("ckan.test", "https://user:pw@ckan.test/x.ttl", True),
+            ("ckan.test", "HTTPS://CKAN.TEST/x.ttl", True),
+            ("ckan.test", "https://ckan.test:443/x.ttl", True),
+            ("ckan.test", "https://ckan.test:0/x.ttl", True),
+            ("ckan.test", "https://evil.example/x.ttl", False),
+            ("ckan.test", "http://ckan.test/x.ttl", False),
+            ("bücher.example", "https://bücher.example/x.ttl", True),
+            ("bücher.example", "https://BÜCHER.EXAMPLE/x.ttl", True),
+            ("bücher.example", "https://xn--bcher-kva.example/x.ttl", True),
+            ("bücher.example", "https://bücher.example.evil/x.ttl", False),
+            ("bücher.example", "https://bucher.example/x.ttl", False),
+        ]
+        for address, url, expected_own in cases:
+            with self.subTest(address=address, url=url):
+                session, adapter = recording_session(
+                    responder(resource(url=url, url_type=""))
+                )
+                c = CkanClient(address, api_token=TOKEN, session=session)
+
+                _ = c.resources.download("res-1", directory=self.fresh_directory())
+
+                get = adapter.requests[1]
+                own_base = requests.Request("GET", c.base_url).prepare().url
+                own = connection_origin(get.url) == connection_origin(own_base)
+                self.assertEqual(own, expected_own)
+                self.assertEqual("Authorization" in get.headers, own)
+                # requests replaces the token with Basic auth from userinfo.
+                has_userinfo = parse_url(str(get.url)).auth is not None
+                self.assertEqual(
+                    get.headers.get("Authorization") == TOKEN, own and not has_userinfo
+                )
+
     def test_client_without_token_sends_no_authorization(self):
         session, adapter = recording_session(responder(resource(url=OWN_URL)))
         c = CkanClient("ckan.test", session=session)
@@ -613,6 +686,22 @@ class TestContentUrl(_TempDirTestCase):
         "https://:443/data.ttl",
         "https://ckan.test:abc/data.ttl",
         "https://ckan.test:99999/data.ttl",
+        # Hosts that urlsplit or requests reject (R1-2).
+        "https://[evil/x.ttl",
+        "https://[evil]/x.ttl",
+        "https://a℀b.example/x.ttl",
+        "https://.evil/x.ttl",
+        "https://*.evil/x.ttl",
+        # A backslash or a control character anywhere (R1-1).
+        "https://evil.example\\@ckan.test/x.ttl",
+        "https://ckan.test:8443\\@ckan.test/x.ttl",
+        "https://ckan.test/a\\b.ttl",
+        "https://ckan.test/a\tb.ttl",
+        "https://ckan.test/a\nb.ttl",
+        "https://ckan.test/a\x00b.ttl",
+        "https://ckan.test/a\x1fb.ttl",
+        "https://ckan.test/a\x7fb.ttl",
+        "https://ckan.test/x.ttl?q=a\\b",
     ]
 
     def test_invalid_content_url_raises_before_content_request(self):
