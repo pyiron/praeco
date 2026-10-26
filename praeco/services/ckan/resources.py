@@ -125,8 +125,8 @@ class ResourcesResource:
             default_file_name(resource, url)
             for resource, url in zip(uploads, urls, strict=True)
         ]
-        targets = [safe_target_path(directory, name) for name in names]
         check_unique_names(uploads, names)
+        targets = [safe_target_path(directory, name) for name in names]
         check_local_conflicts(directory, targets, overwrite=overwrite)
         return [
             self._write_content(resource, url, target, overwrite=overwrite)
