@@ -45,12 +45,26 @@ def content_url(resource: CkanResourceInfo) -> str:
             f"resource {resource.id!r} content URL must not contain a backslash "
             f"or control characters: {url!r}"
         )
-    if _origin(url) is None:
+    if not _splits(url) or _origin(url) is None:
         raise ValidationError(
             f"resource {resource.id!r} content URL must be an absolute HTTP(S) "
             f"URL: {url!r}"
         )
     return url
+
+
+def _splits(url: str) -> bool:
+    """Return whether `urlsplit` accepts `url`, including its port.
+
+    Later steps, such as `default_file_name`, parse the original URL with
+    `urlsplit`, which rejects some userinfo that `requests` accepts.
+    """
+    try:
+        parts = urlsplit(url)
+        _ = parts.hostname, parts.port
+    except ValueError:
+        return False
+    return True
 
 
 def sends_token(url: str, base_url: str) -> bool:
