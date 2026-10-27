@@ -14,6 +14,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, cast
+from unittest import mock
 from urllib.parse import quote, urlparse
 
 import requests
@@ -1107,8 +1108,8 @@ class TestLocalChecks(_TempDirTestCase):
 class TestTargetContainment(_TempDirTestCase):
     """R1-10: targets must resolve inside `directory`, as in Zenodo.
 
-    Symlink loops are not tested: `Path.resolve` raises on them on Python
-    3.11 and 3.12, but not on 3.13.
+    A symlink loop skips the containment check on every Python version, so
+    the `FileExistsError` rules decide (R2-2).
     """
 
     def setUp(self):
@@ -1247,6 +1248,50 @@ class TestTargetContainment(_TempDirTestCase):
                 self.assertEqual(len(session.calls), 1)
                 self.assertEqual((self.directory / "data.ttl").read_text(), "old")
 
+    def test_symlink_loop_at_target_follows_the_existing_rules(self):
+        for method in ("download", "download_all"):
+            payload = resource() if method == "download" else package(resource())
+            with self.subTest(method=method, overwrite=False):
+                link = self.link("data.ttl", self.directory / "data.ttl")
+                c, session = make_client([action(payload)])
+
+                with self.assertRaises(FileExistsError):
+                    getattr(c.resources, method)("x", directory=self.directory)
+
+                self.assertEqual(len(session.calls), 1)
+                self.assertTrue(link.is_symlink())
+                self.assertEqual(Path(os.readlink(link)).name, "data.ttl")
+            with self.subTest(method=method, overwrite=True):
+                link = self.link("data.ttl", self.directory / "data.ttl")
+                c, session = make_client([action(payload), content(b"new")])
+
+                _ = getattr(c.resources, method)(
+                    "x", directory=self.directory, overwrite=True
+                )
+
+                self.assertFalse(link.is_symlink())
+                self.assertEqual(link.read_bytes(), b"new")
+                self.assertEqual(len(session.calls), 2)
+                link.unlink()
+
+    def test_directory_that_is_a_symlink_loop_raises_file_exists_error(self):
+        loop = self.root / "loop"
+        loop.symlink_to(loop)
+        self.addCleanup(loop.unlink)
+        for method in ("download", "download_all"):
+            payload = resource() if method == "download" else package(resource())
+            for overwrite in (False, True):
+                with self.subTest(method=method, overwrite=overwrite):
+                    c, session = make_client([action(payload)])
+
+                    with self.assertRaises(FileExistsError):
+                        getattr(c.resources, method)(
+                            "x", directory=loop, overwrite=overwrite
+                        )
+
+                    self.assertEqual(len(session.calls), 1)
+                    self.assertTrue(loop.is_symlink())
+
     def test_download_all_checks_every_target_before_the_first_content_request(self):
         _ = self.link("evil.ttl", self.root / "missing.txt")
         resources = [
@@ -1261,6 +1306,51 @@ class TestTargetContainment(_TempDirTestCase):
         self.assertEqual(len(session.calls), 1)
         self.assertFalse((self.directory / "a.ttl").exists())
         self.assert_outside_untouched()
+
+
+class TestResolveRuntimeError(_TempDirTestCase):
+    """R2-2: a `RuntimeError` from `Path.resolve` skips the containment check.
+
+    Python 3.11 and 3.12 raise it for a symlink loop, 3.13 does not. Patching
+    `Path.resolve` only around the call under test simulates the older
+    versions on every interpreter, without needing symlinks.
+    """
+
+    def resolve_raises(self) -> Any:
+        return mock.patch.object(
+            Path, "resolve", autospec=True, side_effect=RuntimeError("Symlink loop")
+        )
+
+    def test_existing_target_raises_file_exists_error(self):
+        (self.root / "data.ttl").write_text("old")
+        for method in ("download", "download_all"):
+            payload = resource() if method == "download" else package(resource())
+            with self.subTest(method=method):
+                c, session = make_client([action(payload)])
+
+                with (
+                    self.resolve_raises() as resolve,
+                    self.assertRaises(FileExistsError),
+                ):
+                    getattr(c.resources, method)("x", directory=self.root)
+
+                self.assertTrue(resolve.called)
+                self.assertEqual(len(session.calls), 1)
+                self.assertEqual((self.root / "data.ttl").read_text(), "old")
+
+    def test_missing_target_is_downloaded(self):
+        for method in ("download", "download_all"):
+            payload = resource() if method == "download" else package(resource())
+            with self.subTest(method=method):
+                directory = self.fresh_directory()
+                c, session = make_client([action(payload), content(b"abc")])
+
+                with self.resolve_raises() as resolve:
+                    _ = getattr(c.resources, method)("x", directory=directory)
+
+                self.assertTrue(resolve.called)
+                self.assertEqual((directory / "data.ttl").read_bytes(), b"abc")
+                self.assertEqual(len(session.calls), 2)
 
 
 class TestSizeCheck(_TempDirTestCase):
