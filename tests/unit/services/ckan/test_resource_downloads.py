@@ -14,10 +14,9 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, cast
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 import requests
-from urllib3.util import parse_url
 
 from praeco.exceptions import HttpError, ValidationError
 from praeco.services.ckan import CkanClient
@@ -422,11 +421,16 @@ def responder(
 
 
 def connection_origin(url: str | None) -> tuple[str, str, int]:
-    """Return the scheme, host and port that urllib3 connects to for `url`."""
-    parts = parse_url(str(url))
-    scheme = (parts.scheme or "").lower()
+    """Return the scheme, host and port that requests connects to for `url`.
+
+    This mirrors `_urllib3_request_context` in ``requests/adapters.py``
+    (2.34.2): `urlparse` of the prepared URL, using its ``hostname`` and
+    ``port``, where urllib3 fills in the scheme's default port.
+    """
+    parts = urlparse(str(url))
+    scheme = parts.scheme.lower()
     port = parts.port if parts.port is not None else {"http": 80, "https": 443}[scheme]
-    return scheme, (parts.host or "").lower(), port
+    return scheme, parts.hostname or "", port
 
 
 class TestTokenRule(_TempDirTestCase):
@@ -595,8 +599,8 @@ class TestTokenRule(_TempDirTestCase):
 
     def test_token_follows_the_origin_requests_connects_to(self):
         # Accepted URLs that parsers can read differently. The origin is
-        # taken from the request as requests prepared it, with urllib3's
-        # parser, which is what the connection uses.
+        # taken from the request as requests prepared it, parsed the way the
+        # requests adapter does to choose the connection.
         cases = [
             ("ckan.test", "https://evil.example#@ckan.test/x.ttl", False),
             ("ckan.test", "https://evil.example?@ckan.test/x.ttl", False),
@@ -628,7 +632,7 @@ class TestTokenRule(_TempDirTestCase):
                 self.assertEqual(own, expected_own)
                 self.assertEqual("Authorization" in get.headers, own)
                 # requests replaces the token with Basic auth from userinfo.
-                has_userinfo = parse_url(str(get.url)).auth is not None
+                has_userinfo = urlparse(str(get.url)).username is not None
                 self.assertEqual(
                     get.headers.get("Authorization") == TOKEN, own and not has_userinfo
                 )
