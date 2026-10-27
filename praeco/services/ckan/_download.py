@@ -178,10 +178,12 @@ def safe_target_path(directory: str | Path, name: str) -> Path:
         resolved_base = base.resolve().resolve()
         resolved_target = target.resolve().resolve()
     except RuntimeError:
-        # Python 3.11 and 3.12 raise RuntimeError for a symlink loop. Python
-        # 3.13's non-strict resolve() does not, and the looped path then
-        # counts as inside; leave the decision to `check_local_conflicts`, as
-        # on 3.13.
+        # Python 3.11 and 3.12 raise RuntimeError for a symlink loop; leave
+        # the decision to `check_local_conflicts`. On 3.13, resolve() does not
+        # raise and the containment check below decides. That normally
+        # passes, but on Windows it can reject a loop whose link stores a
+        # non-canonical path (for example 8.3 short names), as Zenodo's
+        # identical check does.
         return target
     if resolved_target == resolved_base or not resolved_target.is_relative_to(
         resolved_base
