@@ -1108,8 +1108,11 @@ class TestLocalChecks(_TempDirTestCase):
 class TestTargetContainment(_TempDirTestCase):
     """R1-10: targets must resolve inside `directory`, as in Zenodo.
 
-    A symlink loop skips the containment check on every Python version, so
-    the `FileExistsError` rules decide (R2-2).
+    A symlink loop normally ends up with the `FileExistsError` rules (R2-2).
+    On Python 3.13 the containment check runs and passes; on 3.11 and 3.12
+    `resolve()` raises `RuntimeError` and the check is skipped. On Windows
+    with 3.13, a loop whose link stores a non-canonical spelling (for example
+    8.3 short names) is rejected by the containment check instead.
     """
 
     def setUp(self):
@@ -1249,8 +1252,33 @@ class TestTargetContainment(_TempDirTestCase):
                 self.assertEqual((self.directory / "data.ttl").read_text(), "old")
 
     def test_symlink_loop_at_target_follows_the_existing_rules(self):
+        # README limitation: on Windows with Python 3.13, resolve() returns a
+        # looped link's stored path, while `directory` resolves to its
+        # canonical spelling. If the two differ (as with the 8.3 short names
+        # in the GitHub runners' temporary directory), the containment check
+        # rejects the loop before any content request, as in Zenodo.
+        loop_rejected = (
+            sys.platform == "win32"
+            and sys.version_info >= (3, 13)
+            and self.directory.resolve() != self.directory
+        )
         for method in ("download", "download_all"):
             payload = resource() if method == "download" else package(resource())
+            if loop_rejected:
+                for overwrite in (False, True):
+                    with self.subTest(method=method, overwrite=overwrite):
+                        link = self.link("data.ttl", self.directory / "data.ttl")
+                        c, session = make_client([action(payload), content(b"new")])
+
+                        with self.assertRaises(ValidationError):
+                            getattr(c.resources, method)(
+                                "x", directory=self.directory, overwrite=overwrite
+                            )
+
+                        self.assertEqual(len(session.calls), 1)
+                        self.assertTrue(link.is_symlink())
+                        self.assertEqual(Path(os.readlink(link)).name, "data.ttl")
+                continue
             with self.subTest(method=method, overwrite=False):
                 link = self.link("data.ttl", self.directory / "data.ttl")
                 c, session = make_client([action(payload)])
