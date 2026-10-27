@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import os
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from urllib.parse import unquote, urlsplit
 
 import requests
@@ -248,7 +248,12 @@ def open_content(client: CkanClient, url: str) -> requests.Response:
     origin; for other URLs it is dropped for this request. A status of 400 or
     higher raises `CkanApiError`, and the response is closed.
     """
-    headers = None if sends_token(url, client.base_url) else {"Authorization": None}
+    # requests documents that a None value in a per-request header omits that
+    # session header; its inline type hints do not express that, so the
+    # mapping's values are typed as Any.
+    headers: Mapping[str, Any] | None = (
+        None if sends_token(url, client.base_url) else {"Authorization": None}
+    )
     resp = client.session.request(
         method="GET",
         url=url,
