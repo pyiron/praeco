@@ -1,7 +1,10 @@
+import json
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, cast
+
+import requests
 
 from praeco.exceptions import ValidationError
 from praeco.services.ckan.models import CkanPackageInfo, CkanResourceInfo
@@ -11,7 +14,15 @@ from praeco.services.dataportal import (
     DataportalDatasetInfo,
 )
 
-from ._helpers import FakeSession
+from ..ckan._helpers import Reply, recording_session
+from ._helpers import FakeResponse, FakeSession
+
+DOWNLOADED = Path("downloaded", "data.csv")
+TOKEN = "secret-token"
+DATAPORTAL_URL = (
+    "https://dataportal.material-digital.de/dataset/pkg-1/resource/res-1/"
+    "download/data.ttl"
+)
 
 
 def resource_payload(
@@ -52,6 +63,14 @@ class StubResourcesResource:
 
     def delete(self, resource: str) -> None:
         self.calls.append(("delete", resource))
+
+    def download(self, resource: str, **kwargs: Any) -> Path:
+        self.calls.append(("download", resource, kwargs))
+        return DOWNLOADED
+
+    def download_all(self, package: str, **kwargs: Any) -> list[Path]:
+        self.calls.append(("download_all", package, kwargs))
+        return [DOWNLOADED]
 
 
 def client_with_stub() -> tuple[DataportalClient, StubResourcesResource]:
@@ -294,6 +313,199 @@ class TestAssetsResource(unittest.TestCase):
             client.assets.show(" ")
 
         self.assertEqual(resources.calls, [])
+
+
+def dataset_model(dataset_id: str) -> DataportalDatasetInfo:
+    return DataportalDatasetInfo.from_ckan(
+        CkanPackageInfo.from_dict({"id": dataset_id, "name": "dataset"})
+    )
+
+
+def asset_model(asset_id: str) -> DataportalAssetInfo:
+    return DataportalAssetInfo.from_ckan(
+        CkanResourceInfo.from_dict(resource_payload(resource_id=asset_id))
+    )
+
+
+class TestAssetDownloadWrappers(unittest.TestCase):
+    """The `client.assets` download methods only map ids and delegate."""
+
+    def test_download_delegates_asset_id_and_options(self):
+        client, resources = client_with_stub()
+
+        for asset in ("res-2", asset_model("res-2")):
+            with self.subTest(asset=type(asset).__name__):
+                resources.calls.clear()
+
+                path = client.assets.download(
+                    asset, directory="out", filename="x.csv", overwrite=True
+                )
+
+                self.assertEqual(path, DOWNLOADED)
+                self.assertEqual(
+                    resources.calls,
+                    [
+                        (
+                            "download",
+                            "res-2",
+                            {
+                                "directory": "out",
+                                "filename": "x.csv",
+                                "overwrite": True,
+                            },
+                        )
+                    ],
+                )
+
+    def test_download_passes_the_default_options(self):
+        client, resources = client_with_stub()
+
+        _ = client.assets.download("res-1")
+
+        self.assertEqual(
+            resources.calls,
+            [
+                (
+                    "download",
+                    "res-1",
+                    {"directory": ".", "filename": None, "overwrite": False},
+                )
+            ],
+        )
+
+    def test_download_all_delegates_dataset_id_and_options(self):
+        client, resources = client_with_stub()
+        directory = Path("out")
+
+        for dataset in ("pkg-2", dataset_model("pkg-2")):
+            with self.subTest(dataset=type(dataset).__name__):
+                resources.calls.clear()
+
+                paths = client.assets.download_all(
+                    dataset, directory=directory, overwrite=True
+                )
+
+                self.assertEqual(paths, [DOWNLOADED])
+                self.assertEqual(
+                    resources.calls,
+                    [
+                        (
+                            "download_all",
+                            "pkg-2",
+                            {"directory": directory, "overwrite": True},
+                        )
+                    ],
+                )
+
+    def test_download_all_passes_the_default_options(self):
+        client, resources = client_with_stub()
+
+        _ = client.assets.download_all("pkg-1")
+
+        self.assertEqual(
+            resources.calls,
+            [("download_all", "pkg-1", {"directory": ".", "overwrite": False})],
+        )
+
+    def test_blank_ids_are_rejected_without_delegating(self):
+        client, resources = client_with_stub()
+
+        with self.assertRaisesRegex(ValidationError, "asset id must be non-empty"):
+            client.assets.download(" ")
+        with self.assertRaisesRegex(ValidationError, "dataset id must be non-empty"):
+            client.assets.download_all(" ")
+
+        self.assertEqual(resources.calls, [])
+
+
+def action(result: Any) -> FakeResponse:
+    return FakeResponse(json_value={"success": True, "result": result})
+
+
+def uploaded(resource_id: str, name: str, **extra: Any) -> dict[str, Any]:
+    return {
+        **resource_payload(resource_id=resource_id),
+        "url": DATAPORTAL_URL.replace("data.ttl", name),
+        "url_type": "upload",
+        **extra,
+    }
+
+
+class TestAssetDownloads(unittest.TestCase):
+    """End to end through `DataportalClient` and its CKAN resources."""
+
+    def setUp(self):
+        self._tmp = TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+
+    def test_download_writes_the_asset_after_one_resource_show(self):
+        response = FakeResponse(body=b"abc")
+        session = FakeSession([action(uploaded("res-1", "data.ttl", size=3)), response])
+        client = DataportalClient(session=cast(Any, session))
+
+        path = client.assets.download(asset_model("res-1"), directory=self.root)
+
+        self.assertEqual(path, self.root / "data.ttl")
+        self.assertEqual(path.read_bytes(), b"abc")
+        self.assertEqual(
+            [(call["method"], call["url"]) for call in session.calls],
+            [
+                (
+                    "POST",
+                    "https://dataportal.material-digital.de/api/3/action/resource_show",
+                ),
+                ("GET", DATAPORTAL_URL),
+            ],
+        )
+        self.assertEqual(session.calls[0]["json"], {"id": "res-1"})
+        self.assertTrue(response.closed)
+
+    def test_download_all_writes_uploaded_assets_only(self):
+        link = {**resource_payload(resource_id="link-1"), "url_type": ""}
+        payload = {
+            "id": "pkg-1",
+            "name": "dataset",
+            "resources": [uploaded("res-1", "a.ttl"), link, uploaded("res-2", "b.ttl")],
+        }
+        session = FakeSession(
+            [action(payload), FakeResponse(body=b"A"), FakeResponse(body=b"B")]
+        )
+        client = DataportalClient(session=cast(Any, session))
+
+        paths = client.assets.download_all(dataset_model("pkg-1"), directory=self.root)
+
+        self.assertEqual(paths, [self.root / "a.ttl", self.root / "b.ttl"])
+        self.assertEqual([p.read_bytes() for p in paths], [b"A", b"B"])
+        self.assertEqual(len(session.calls), 3)
+        self.assertEqual(session.calls[0]["json"], {"id": "pkg-1"})
+
+    def test_token_goes_to_the_dataportal_only(self):
+        for url, expected in (
+            (DATAPORTAL_URL, TOKEN),
+            ("https://files.example.test/data.ttl", None),
+        ):
+            with self.subTest(url=url):
+
+                def respond(request: requests.PreparedRequest, url: str = url) -> Reply:
+                    if request.method == "POST":
+                        payload = {**resource_payload(), "url": url}
+                        result = {"success": True, "result": payload}
+                        return 200, {}, json.dumps(result).encode()
+                    return 200, {}, b"content"
+
+                session, adapter = recording_session(respond)
+                client = DataportalClient(api_token=TOKEN, session=session)
+
+                with TemporaryDirectory() as directory:
+                    path = client.assets.download("res-1", directory=directory)
+
+                    self.assertEqual(path.read_bytes(), b"content")
+
+                self.assertEqual(
+                    [r.headers.get("Authorization") for r in adapter.requests],
+                    [TOKEN, expected],
+                )
 
 
 if __name__ == "__main__":

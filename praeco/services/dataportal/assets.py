@@ -119,6 +119,43 @@ class AssetsResource:
         """Delete an asset."""
         self.client.resources.delete(_asset_id(asset))
 
+    def download(
+        self,
+        asset: str | DataportalAssetInfo,
+        *,
+        directory: str | Path = ".",
+        filename: str | None = None,
+        overwrite: bool = False,
+    ) -> Path:
+        """Download an asset's content into `directory` and return its path.
+
+        See `CkanClient.resources.download` for naming, token, and overwrite
+        rules.
+        """
+        return self.client.resources.download(
+            _asset_id(asset),
+            directory=directory,
+            filename=filename,
+            overwrite=overwrite,
+        )
+
+    def download_all(
+        self,
+        dataset: str | DataportalDatasetInfo,
+        *,
+        directory: str | Path = ".",
+        overwrite: bool = False,
+    ) -> list[Path]:
+        """Download every uploaded asset of a dataset into `directory`.
+
+        Link assets are skipped. See `CkanClient.resources.download_all`.
+        """
+        return self.client.resources.download_all(
+            _dataset_id(dataset),
+            directory=directory,
+            overwrite=overwrite,
+        )
+
 
 def _dataset_id(dataset: str | DataportalDatasetInfo) -> str:
     if isinstance(dataset, DataportalDatasetInfo):
