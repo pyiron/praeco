@@ -707,6 +707,10 @@ class TestContentUrl(_TempDirTestCase):
         "https://ckan.test/a\x1fb.ttl",
         "https://ckan.test/a\x7fb.ttl",
         "https://ckan.test/x.ttl?q=a\\b",
+        # Userinfo that requests accepts but urlsplit rejects (R2-1).
+        "https://user[@ckan.test/x.ttl",
+        "https://u]ser@ckan.test/x.ttl",
+        "https://a℀b@ckan.test/x.ttl",
     ]
 
     def test_invalid_content_url_raises_before_content_request(self):
@@ -1203,7 +1207,8 @@ class TestTargetContainment(_TempDirTestCase):
         self.assertEqual(path, alias / "data.ttl")
         self.assertEqual((self.directory / "data.ttl").read_bytes(), b"abc")
 
-    def test_containment_comes_before_duplicate_names(self):
+    def test_duplicate_names_come_before_containment(self):
+        # As in Zenodo, whose download_all checks unique names first.
         _ = self.link("evil.ttl", self.outside)
         resources = [
             resource("res-1", url=upload_url("data.ttl")),
@@ -1215,9 +1220,11 @@ class TestTargetContainment(_TempDirTestCase):
         with self.assertRaises(ValidationError) as caught:
             c.resources.download_all("pkg-1", directory=self.directory)
 
-        self.assertIn("evil.ttl", str(caught.exception))
-        self.assertNotIn("res-2", str(caught.exception))
+        self.assertIn("res-1", str(caught.exception))
+        self.assertIn("res-2", str(caught.exception))
+        self.assertNotIn("evil.ttl", str(caught.exception))
         self.assertEqual(len(session.calls), 1)
+        self.assertTrue((self.directory / "evil.ttl").is_symlink())
 
     def test_containment_comes_before_file_exists_errors(self):
         _ = self.link("evil.ttl", self.outside)
