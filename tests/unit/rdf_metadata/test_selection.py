@@ -511,6 +511,22 @@ class TestAutomaticSelection(unittest.TestCase):
         self.assertIsNone(result.subject)
         self.assertEqual(result.diagnostics[0].code, "subject_ambiguous")
 
+    def test_blank_node_candidates_are_counted_by_term(self):
+        block = f'[] a {DATASET}; {TITLE} "T" .\n'
+        single = harvest(block).select_subject_automatically()
+        (candidate,) = single.subject_candidates
+        self.assertEqual(single.subject_origin, "automatic")
+        self.assertIsInstance(single.subject.term, BNode)
+        self.assertEqual(single.subject.term, candidate.subject.term)
+        twice = harvest(block + block).select_subject_automatically()
+        self.assertIsNone(twice.subject)
+        self.assertEqual(
+            subject_diagnostics(twice), [("subject_ambiguous", None, None, True)]
+        )
+        self.assertEqual([c.eligible for c in twice.subject_candidates], [True, True])
+        first, second = (c.subject.term for c in twice.subject_candidates)
+        self.assertNotEqual(first, second)
+
     def test_no_eligible_candidate_is_reported_as_missing(self):
         for text in (
             "",
