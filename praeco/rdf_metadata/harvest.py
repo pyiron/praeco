@@ -41,7 +41,10 @@ from praeco.rdf_metadata.source import LoadedSource, load_source
 
 @dataclass(frozen=True)
 class RdfMetadataHarvest:
-    """A source snapshot with one explicitly selected publication subject."""
+    """A source snapshot with one selected publication subject.
+
+    The subject is chosen explicitly or, on request, automatically.
+    """
 
     _source: LoadedSource = field(repr=False, compare=False)
     _preferred_languages: tuple[str | None, ...] = field(repr=False)
@@ -231,7 +234,7 @@ class RdfMetadataHarvest:
                     "subject_candidate_missing",
                     None,
                     None,
-                    "No publication subject is eligible; select one explicitly.",
+                    "No publication subject is eligible; inspect harvest.subject_candidates and select one explicitly.",
                     True,
                 )
             )
