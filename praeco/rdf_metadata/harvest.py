@@ -32,6 +32,7 @@ from praeco.rdf_metadata.models import (
     MetadataOverrides,
     OptionalField,
     SourceInfo,
+    SubjectCandidate,
     SubjectRecord,
     Suggestion,
 )
@@ -112,6 +113,11 @@ class RdfMetadataHarvest:
     @property
     def subjects(self) -> tuple[SubjectRecord, ...]:
         return self._source.subjects
+
+    @property
+    def subject_candidates(self) -> tuple[SubjectCandidate, ...]:
+        """Possible publications, in subject order, with the rules applied."""
+        return self._source.candidates
 
     @property
     def diagnostics(self) -> tuple[Diagnostic, ...]:

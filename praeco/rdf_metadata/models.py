@@ -167,6 +167,15 @@ class SubjectRecord:
 
 
 @dataclass(frozen=True)
+class SubjectCandidate:
+    """A possible publication subject and the decision rules applied to it."""
+
+    subject: SubjectRecord
+    eligible: bool
+    evidence: tuple[Evidence, ...]
+
+
+@dataclass(frozen=True)
 class Diagnostic:
     """An explanation of review state, with a stable machine-readable code."""
 
