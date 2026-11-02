@@ -7,7 +7,7 @@ from copy import deepcopy
 from dataclasses import asdict, dataclass, field, replace
 from datetime import date
 from pathlib import Path
-from typing import Any, Self, Unpack, cast
+from typing import Any, Literal, Self, Unpack, cast
 
 from rdflib import Graph, URIRef
 
@@ -54,6 +54,10 @@ class RdfMetadataHarvest:
         repr=False,
     )
     _creators: CreatorReview = field(default_factory=CreatorReview, repr=False)
+    _subject_origin: Literal["selection", "automatic"] | None = field(
+        default=None, repr=False
+    )
+    _automatic_attempted: bool = field(default=False, repr=False)
 
     def _raw_field(self, name: FieldName) -> FieldReview[object]:
         return next(review for review in self._reviews if review.field == name)
@@ -118,6 +122,11 @@ class RdfMetadataHarvest:
     def subject_candidates(self) -> tuple[SubjectCandidate, ...]:
         """Possible publications, in subject order, with the rules applied."""
         return self._source.candidates
+
+    @property
+    def subject_origin(self) -> Literal["selection", "automatic"] | None:
+        """How the publication subject was chosen; None while unselected."""
+        return self._subject_origin
 
     @property
     def diagnostics(self) -> tuple[Diagnostic, ...]:
@@ -192,25 +201,51 @@ class RdfMetadataHarvest:
                         )
                     )
             return tuple(diagnostics)
+        unselected: list[Diagnostic] = []
         if self._requested_subject is not None:
-            return (
+            unselected.append(
                 Diagnostic(
                     "subject_not_found",
                     None,
                     self._requested_subject,
                     "The requested subject is absent from the source.",
                     True,
-                ),
+                )
             )
-        return (
-            Diagnostic(
-                "subject_required",
-                None,
-                None,
-                "Select a publication subject before reviewing metadata.",
-                True,
-            ),
-        )
+        # A failed automatic attempt found either none or several eligible subjects.
+        eligible = tuple(item for item in self.subject_candidates if item.eligible)
+        if self._automatic_attempted and eligible:
+            unselected.append(
+                Diagnostic(
+                    "subject_ambiguous",
+                    None,
+                    None,
+                    "Several publication subjects are eligible; select one explicitly.",
+                    True,
+                    tuple(evidence for item in eligible for evidence in item.evidence),
+                )
+            )
+        elif self._automatic_attempted:
+            unselected.append(
+                Diagnostic(
+                    "subject_candidate_missing",
+                    None,
+                    None,
+                    "No publication subject is eligible; select one explicitly.",
+                    True,
+                )
+            )
+        elif self._requested_subject is None:
+            unselected.append(
+                Diagnostic(
+                    "subject_required",
+                    None,
+                    None,
+                    "Select a publication subject before reviewing metadata.",
+                    True,
+                )
+            )
+        return tuple(unselected)
 
     def select_subject(self, subject: SubjectRecord | str | URIRef) -> Self:
         """Resolve a missing selection; a selected publication stays fixed."""
@@ -254,7 +289,23 @@ class RdfMetadataHarvest:
             _requested_subject=URIRef(term) if record is None else None,
             _reviews=reviews,
             _creators=creators,
+            _subject_origin=None if record is None else "selection",
+            _automatic_attempted=record is None and self._automatic_attempted,
         )
+
+    def select_subject_automatically(self) -> Self:
+        """Select the only eligible publication subject, if there is exactly one.
+
+        Otherwise the returned harvest stays unselected and its diagnostics
+        explain why; ``subject_candidates`` shows the evidence for each subject.
+        """
+        if self.subject is not None:
+            raise ValidationError("subject is fixed; create a separate harvest")
+        eligible = [item for item in self.subject_candidates if item.eligible]
+        if len(eligible) == 1:
+            selected = self.select_subject(eligible[0].subject)
+            return replace(selected, _subject_origin="automatic")
+        return replace(self, _automatic_attempted=True)
 
     def _require_subject(self) -> SubjectRecord:
         if self.subject is None:
