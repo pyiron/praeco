@@ -628,10 +628,11 @@ class TestAutomaticSelection(unittest.TestCase):
         result = failed.select_subject(candidate.subject)
         self.assertEqual(result.subject.term, URIRef("urn:b"))
         self.assertEqual(result.subject_origin, "selection")
-        self.assertEqual(result.diagnostics, loaded.select_subject("urn:b").diagnostics)
+        # A successful explicit selection leaves no trace of the failed attempt.
+        self.assertEqual(result, loaded.select_subject("urn:b"))
         self.assertEqual(failed.diagnostics[0].code, "subject_ambiguous")
 
-    def test_explicit_selection_after_a_failed_attempt(self):
+    def test_absent_selection_after_a_failed_attempt_keeps_both_diagnostics(self):
         text = f'<urn:a> a {DATASET}; {TITLE} "A" . <urn:b> a {DATASET}; {TITLE} "B" .'
         loaded = harvest(text)
         failed = loaded.select_subject_automatically()
@@ -645,8 +646,6 @@ class TestAutomaticSelection(unittest.TestCase):
         self.assertEqual(subject_diagnostics(absent), expected)
         repeated = absent.select_subject_automatically()
         self.assertEqual(subject_diagnostics(repeated), expected)
-        # A successful explicit selection leaves no trace of the failed attempt.
-        self.assertEqual(failed.select_subject("urn:a"), loaded.select_subject("urn:a"))
 
     def test_excluded_resources_remain_explicitly_selectable(self):
         text = PREFIXES + """
