@@ -495,6 +495,14 @@ class TestAutomaticSelection(unittest.TestCase):
                     [(c.subject.term, c.eligible) for c in result.subject_candidates],
                     [(URIRef("urn:a"), True), (URIRef("urn:b"), True)],
                 )
+                with self.assertRaises(IncompleteHarvestError) as caught:
+                    result.to_publication_metadata()
+                self.assertEqual(
+                    [item.code for item in caught.exception.diagnostics],
+                    ["subject_ambiguous"],
+                )
+                with self.assertRaisesRegex(ValidationError, "select a valid subject"):
+                    result.clear("doi")
                 self.assertEqual(
                     subject_diagnostics(loaded),
                     [("subject_required", None, None, True)],
