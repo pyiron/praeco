@@ -234,7 +234,7 @@ class RdfMetadataHarvest:
                     "subject_candidate_missing",
                     None,
                     None,
-                    "No publication subject is eligible; inspect harvest.subject_candidates and select one explicitly.",
+                    "No publication subject is eligible; see harvest.subject_candidates for the reasons and select one of harvest.subjects explicitly.",
                     True,
                 )
             )
