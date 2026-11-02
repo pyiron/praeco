@@ -8,10 +8,23 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from rdflib import CSVW, DCAT, OWL, PROV, RDF, VOID, BNode, Graph, Literal, URIRef
+from rdflib import (
+    CSVW,
+    DC,
+    DCAT,
+    DCTERMS,
+    OWL,
+    PROV,
+    RDF,
+    VOID,
+    BNode,
+    Graph,
+    Literal,
+    URIRef,
+)
 from rdflib.term import Node
 
-from praeco.rdf_metadata.extraction import _CREATORS, TEXT_PREDICATES, schema
+from praeco.rdf_metadata.extraction import TEXT_PREDICATES, schema
 from praeco.rdf_metadata.models import Evidence, SubjectCandidate, SubjectRecord
 
 PUBLICATION_TYPES = frozenset(
@@ -37,7 +50,13 @@ STRUCTURAL_TYPES = frozenset(
     )
 )
 STRUCTURAL_PROPERTIES = (CSVW.url, CSVW.tableSchema)
-_AGENT_LINKS = (*_CREATORS, PROV.wasAttributedTo)
+# The decision table's own agent links, independent of creator extraction.
+_AGENT_LINKS = (
+    DC.creator,
+    DCTERMS.creator,
+    *schema("creator"),
+    PROV.wasAttributedTo,
+)
 _Triple = tuple[Node, Node, Node]
 
 
