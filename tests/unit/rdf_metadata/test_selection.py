@@ -589,6 +589,23 @@ class TestAutomaticSelection(unittest.TestCase):
         self.assertEqual(result.diagnostics, loaded.select_subject("urn:b").diagnostics)
         self.assertEqual(failed.diagnostics[0].code, "subject_ambiguous")
 
+    def test_explicit_selection_after_a_failed_attempt(self):
+        text = f'<urn:a> a {DATASET}; {TITLE} "A" . <urn:b> a {DATASET}; {TITLE} "B" .'
+        loaded = harvest(text)
+        failed = loaded.select_subject_automatically()
+        absent = failed.select_subject("urn:absent")
+        expected = [
+            ("subject_not_found", None, URIRef("urn:absent"), True),
+            ("subject_ambiguous", None, None, True),
+        ]
+        self.assertIsNone(absent.subject)
+        self.assertIsNone(absent.subject_origin)
+        self.assertEqual(subject_diagnostics(absent), expected)
+        repeated = absent.select_subject_automatically()
+        self.assertEqual(subject_diagnostics(repeated), expected)
+        # A successful explicit selection leaves no trace of the failed attempt.
+        self.assertEqual(failed.select_subject("urn:a"), loaded.select_subject("urn:a"))
+
     def test_excluded_resources_remain_explicitly_selectable(self):
         text = PREFIXES + """
             <urn:dataset> a dcat:Dataset; dct:title "Dataset" .
