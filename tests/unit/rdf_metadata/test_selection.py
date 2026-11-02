@@ -192,6 +192,24 @@ class TestCandidateEligibility(unittest.TestCase):
             ),
         )
 
+    def test_incomplete_entity_rules_add_no_entity_evidence(self):
+        for case, statements, eligible, evidence in (
+            ("title without agent", 'dct:title "Title"', True, titled_dataset()),
+            (
+                "agent without title",
+                'dct:creator "Jane"',
+                False,
+                (Evidence("publication_type", (("<urn:s>", TYPE, DATASET),)),),
+            ),
+        ):
+            with self.subTest(case=case):
+                result = harvest(
+                    PREFIXES + f"<urn:s> a dcat:Dataset, prov:Entity; {statements} ."
+                )
+                (candidate,) = result.subject_candidates
+                self.assertEqual(candidate.eligible, eligible)
+                self.assertEqual(candidate.evidence, evidence)
+
     def test_structural_types_override_publication_types(self):
         for rdf_type in STRUCTURAL_TYPES:
             with self.subTest(rdf_type=rdf_type):
