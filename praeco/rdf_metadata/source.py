@@ -24,7 +24,13 @@ from rdflib import (
 from rdflib.plugins.parsers.notation3 import RDFSink, SinkParser
 
 from praeco.exceptions import ValidationError
-from praeco.rdf_metadata.models import Evidence, SourceInfo, SubjectRecord
+from praeco.rdf_metadata.models import (
+    Evidence,
+    SourceInfo,
+    SubjectCandidate,
+    SubjectRecord,
+)
+from praeco.rdf_metadata.selection import assess_subjects
 
 _INLINE_BASE = "https://praeco.invalid/rdf/inline/"
 _LABELS = frozenset(
@@ -48,6 +54,7 @@ class LoadedSource:
     info: SourceInfo
     subjects: tuple[SubjectRecord, ...]
     token: object = field(repr=False, compare=False)
+    candidates: tuple[SubjectCandidate, ...]
 
 
 class _LexicalRDFSink(RDFSink):
@@ -149,4 +156,5 @@ def load_source(source: Graph | str | bytes | Path) -> LoadedSource:
                 _context=token,
             )
         )
-    return LoadedSource(graph, info, tuple(records), token)
+    subjects = tuple(records)
+    return LoadedSource(graph, info, subjects, token, assess_subjects(graph, subjects))

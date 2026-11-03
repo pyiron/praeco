@@ -15,6 +15,7 @@ from praeco.rdf_metadata.models import (
     MetadataOverrides,
     OptionalField,
     SourceInfo,
+    SubjectCandidate,
     SubjectRecord,
     Suggestion,
 )
@@ -31,6 +32,7 @@ __all__ = [
     "OptionalField",
     "RdfMetadataHarvest",
     "SourceInfo",
+    "SubjectCandidate",
     "SubjectRecord",
     "Suggestion",
     "harvest_publication_metadata_from_rdf",
