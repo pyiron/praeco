@@ -36,6 +36,7 @@ from praeco.rdf_metadata.models import (
     SubjectRecord,
     Suggestion,
 )
+from praeco.rdf_metadata.pmd import derive_pmd_suggestions
 from praeco.rdf_metadata.source import LoadedSource, load_source
 
 
@@ -61,6 +62,7 @@ class RdfMetadataHarvest:
         default=None, repr=False
     )
     _automatic_attempted: bool = field(default=False, repr=False)
+    _pmd_diagnostics: tuple[Diagnostic, ...] = field(default=(), repr=False)
 
     def _raw_field(self, name: FieldName) -> FieldReview[object]:
         return next(review for review in self._reviews if review.field == name)
@@ -203,6 +205,7 @@ class RdfMetadataHarvest:
                             observation.evidence,
                         )
                     )
+            diagnostics.extend(self._pmd_diagnostics)
             return tuple(diagnostics)
         unselected: list[Diagnostic] = []
         if self._requested_subject is not None:
@@ -269,6 +272,7 @@ class RdfMetadataHarvest:
         record = next((item for item in self.subjects if item.term == term), None)
         reviews = self._reviews
         creators = self._creators
+        pmd_diagnostics = self._pmd_diagnostics
         if record is not None:
             extracted = extract_fields(
                 self._source.graph,
@@ -276,8 +280,23 @@ class RdfMetadataHarvest:
                 self._preferred_languages,
                 self._source.token,
             )
+            eligible = [
+                item.subject.term for item in self.subject_candidates if item.eligible
+            ]
+            suggestions, pmd_diagnostics = derive_pmd_suggestions(
+                self._source.graph,
+                record.term,
+                eligible == [record.term],
+                self._source.token,
+            )
             reviews = tuple(
-                next((item for item in extracted if item.field == review.field), review)
+                _with_suggestions(
+                    next(
+                        (item for item in extracted if item.field == review.field),
+                        review,
+                    ),
+                    suggestions,
+                )
                 for review in reviews
             )
             creators = extract_creators(
@@ -294,6 +313,7 @@ class RdfMetadataHarvest:
             _creators=creators,
             _subject_origin=None if record is None else "selection",
             _automatic_attempted=record is None and self._automatic_attempted,
+            _pmd_diagnostics=pmd_diagnostics,
         )
 
     def select_subject_automatically(self) -> Self:
@@ -462,6 +482,19 @@ class RdfMetadataHarvest:
         }
         values["creators"] = deepcopy(self._creators.value)
         return PublicationMetadata(**values)
+
+
+def _with_suggestions(
+    review: FieldReview[object], suggestions: tuple[Suggestion[object], ...]
+) -> FieldReview[object]:
+    """Add derived suggestions without changing the field's review state."""
+    return replace(
+        review,
+        suggestions=(
+            *review.suggestions,
+            *(item for item in suggestions if item.field == review.field),
+        ),
+    )
 
 
 def _revalidate_object(value: Any) -> Any:
