@@ -58,6 +58,11 @@ STANDARD_3 = """
 <urn:method-id> obo:OBI_0001938 <urn:method-spec> .
 <urn:method-spec> pmd:PMD_0000006 "DIN EN ISO 6892-1" .
 """
+# For behavior that does not depend on the generation: test, its evidence, facts.
+GENERATIONS = (
+    ("pmdco2", TENSILE_TEST_2, TEST_EVIDENCE_2, MATERIAL_2 + STANDARD_2),
+    ("pmdco3", TENSILE_TEST_3, TEST_EVIDENCE_3, MATERIAL_3 + STANDARD_3),
+)
 
 
 def selected(turtle: str):
@@ -538,12 +543,11 @@ class TestPmdSuggestionBoundary(unittest.TestCase):
 
 class TestPmdNoSignature(unittest.TestCase):
     def test_material_or_norm_without_a_test_changes_nothing(self):
-        for triples in (MATERIAL_2, STANDARD_2):
+        for triples in (MATERIAL_2, STANDARD_2, MATERIAL_3, STANDARD_3):
             with self.subTest(triples=triples):
-                without = selected("")
                 result = selected(triples)
                 self.assertEqual(offered(result), ([], []))
-                self.assertEqual(result.diagnostics, without.diagnostics)
+                self.assertEqual(result.diagnostics, selected("").diagnostics)
 
     def test_review_example_has_no_suggestions_or_new_diagnostics(self):
         source = harvest(REVIEW_EXAMPLE)
@@ -561,159 +565,200 @@ class TestPmdNoSignature(unittest.TestCase):
 
 
 class TestPmdSubjectGuard(unittest.TestCase):
-    def assert_refused(self, result, term: str) -> None:
+    def assert_refused(self, result, term: str, evidence: Evidence) -> None:
         self.assertEqual(offered(result), ([], []))
-        refusal = [
-            item
-            for item in result.diagnostics
-            if item.code == "pmd_subject_not_sole_candidate"
-        ]
-        self.assertEqual(len(refusal), 1)
-        self.assertIsNone(refusal[0].field)
-        self.assertEqual(str(refusal[0].subject), term)
-        self.assertFalse(refusal[0].blocking)
-        self.assertEqual(refusal[0].evidence, (TEST_EVIDENCE_2,))
+        refusal = result.diagnostics[-1]
+        self.assertEqual(refusal.code, "pmd_subject_not_sole_candidate")
+        self.assertEqual(codes(result).count(refusal.code), 1)
+        self.assertIsNone(refusal.field)
+        self.assertEqual(str(refusal.subject), term)
+        self.assertFalse(refusal.blocking)
+        self.assertEqual(refusal.evidence, (evidence,))
 
     def test_two_eligible_subjects_refuse_explicit_selection_of_either(self):
-        turtle = (
-            PREFIXES
-            + PUBLICATION
-            + TENSILE_TEST_2
-            + '<urn:other> a dcat:Dataset ; dct:title "Other" .'
-        )
-        for term in ("urn:publication", "urn:other"):
-            with self.subTest(term=term):
-                self.assert_refused(harvest(turtle, subject=term), term)
-                self.assert_refused(harvest(turtle).select_subject(term), term)
+        for generation, test, evidence, _ in GENERATIONS:
+            turtle = (
+                PREFIXES
+                + PUBLICATION
+                + test
+                + '<urn:other> a dcat:Dataset ; dct:title "Other" .'
+            )
+            for term in ("urn:publication", "urn:other"):
+                with self.subTest(generation=generation, term=term):
+                    self.assert_refused(harvest(turtle, subject=term), term, evidence)
+                    self.assert_refused(
+                        harvest(turtle).select_subject(term), term, evidence
+                    )
 
     def test_two_eligible_subjects_leave_automatic_selection_unselected(self):
-        result = harvest(
-            PREFIXES
-            + PUBLICATION
-            + TENSILE_TEST_2
-            + '<urn:other> a dcat:Dataset ; dct:title "Other" .'
-        ).select_subject_automatically()
-        self.assertIsNone(result.subject)
-        self.assertEqual(codes(result), ["subject_ambiguous"])
-        self.assertEqual(offered(result), ([], []))
+        for generation, test, _, _ in GENERATIONS:
+            with self.subTest(generation=generation):
+                result = harvest(
+                    PREFIXES
+                    + PUBLICATION
+                    + test
+                    + '<urn:other> a dcat:Dataset ; dct:title "Other" .'
+                ).select_subject_automatically()
+                self.assertIsNone(result.subject)
+                self.assertEqual(codes(result), ["subject_ambiguous"])
+                self.assertEqual(offered(result), ([], []))
 
     def test_explicitly_selected_non_eligible_subjects_are_refused(self):
-        turtle = (
-            PREFIXES
-            + PUBLICATION
-            + TENSILE_TEST_2
-            + """<urn:table> a csvw:Table ; dct:title "Table" .
-            <urn:resource> rdfs:label "Resource" ."""
-        )
-        for term in ("urn:table", "urn:resource", "urn:test"):
-            with self.subTest(term=term):
-                self.assert_refused(harvest(turtle, subject=term), term)
+        for generation, test, evidence, _ in GENERATIONS:
+            turtle = (
+                PREFIXES
+                + PUBLICATION
+                + test
+                + """<urn:table> a csvw:Table ; dct:title "Table" .
+                <urn:resource> rdfs:label "Resource" ."""
+            )
+            for term in ("urn:table", "urn:resource", "urn:test"):
+                with self.subTest(generation=generation, term=term):
+                    self.assert_refused(harvest(turtle, subject=term), term, evidence)
 
     def test_subject_is_refused_when_no_subject_is_eligible(self):
-        result = harvest(
-            PREFIXES + TENSILE_TEST_2 + '<urn:resource> rdfs:label "Resource" .',
-            subject="urn:resource",
-        )
-        self.assert_refused(result, "urn:resource")
+        for generation, test, evidence, _ in GENERATIONS:
+            with self.subTest(generation=generation):
+                result = harvest(
+                    PREFIXES + test + '<urn:resource> rdfs:label "Resource" .',
+                    subject="urn:resource",
+                )
+                self.assert_refused(result, "urn:resource", evidence)
 
     def test_explicit_selection_of_the_sole_subject_equals_automatic(self):
-        turtle = (
-            PREFIXES
-            + PUBLICATION
-            + TENSILE_TEST_2
-            + MATERIAL_2
-            + STANDARD_2
-            + '<urn:table> a csvw:Table ; dct:title "Table" .'
-        )
-        automatic = harvest(turtle).select_subject_automatically()
-        for explicit in (
-            harvest(turtle, subject="urn:publication"),
-            harvest(turtle).select_subject("urn:publication"),
-            harvest(turtle).select_subject(automatic.subject.term),
-        ):
-            with self.subTest():
-                self.assertEqual(
-                    explicit.description.suggestions, automatic.description.suggestions
-                )
-                self.assertEqual(
-                    explicit.keywords.suggestions, automatic.keywords.suggestions
-                )
-                self.assertEqual(len(explicit.description.suggestions), 1)
-                self.assertEqual(explicit.diagnostics, automatic.diagnostics)
+        for generation, test, _, facts in GENERATIONS:
+            turtle = (
+                PREFIXES
+                + PUBLICATION
+                + test
+                + facts
+                + '<urn:table> a csvw:Table ; dct:title "Table" .'
+            )
+            automatic = harvest(turtle).select_subject_automatically()
+            for explicit in (
+                harvest(turtle, subject="urn:publication"),
+                harvest(turtle).select_subject("urn:publication"),
+                harvest(turtle).select_subject(automatic.subject.term),
+            ):
+                with self.subTest(generation=generation):
+                    self.assertEqual(
+                        explicit.description.suggestions,
+                        automatic.description.suggestions,
+                    )
+                    self.assertEqual(
+                        explicit.keywords.suggestions, automatic.keywords.suggestions
+                    )
+                    self.assertEqual(len(explicit.description.suggestions), 1)
+                    self.assertEqual(explicit.diagnostics, automatic.diagnostics)
 
     def test_refusal_does_not_block_conversion(self):
-        result = harvest(
-            PREFIXES
-            + PUBLICATION
-            + TENSILE_TEST_2
-            + '<urn:table> a csvw:Table ; dct:title "Table" .',
-            subject="urn:table",
-        )
-        reviewed = result.with_overrides(
-            description="Reviewed", creators=(Person(name="Jane Doe"),)
-        )
-        self.assertEqual(codes(reviewed), ["pmd_subject_not_sole_candidate"])
-        self.assertEqual(reviewed.to_publication_metadata().title, "Table")
+        for generation, test, _, _ in GENERATIONS:
+            with self.subTest(generation=generation):
+                result = harvest(
+                    PREFIXES
+                    + PUBLICATION
+                    + test
+                    + '<urn:table> a csvw:Table ; dct:title "Table" .',
+                    subject="urn:table",
+                )
+                reviewed = result.with_overrides(
+                    description="Reviewed", creators=(Person(name="Jane Doe"),)
+                )
+                self.assertEqual(codes(reviewed), ["pmd_subject_not_sole_candidate"])
+                self.assertEqual(reviewed.to_publication_metadata().title, "Table")
 
     def test_absent_subject_runs_no_rule_and_stays_selectable(self):
-        result = harvest(PREFIXES + PUBLICATION + TENSILE_TEST_2, subject="urn:absent")
-        self.assertEqual(codes(result), ["subject_not_found"])
-        self.assertEqual(
-            offered(result.select_subject("urn:publication")),
-            (["Data from 1 tensile test."], [("tensile test",)]),
-        )
+        for generation, test, _, _ in GENERATIONS:
+            with self.subTest(generation=generation):
+                result = harvest(PREFIXES + PUBLICATION + test, subject="urn:absent")
+                self.assertEqual(codes(result), ["subject_not_found"])
+                self.assertEqual(
+                    offered(result.select_subject("urn:publication")),
+                    (["Data from 1 tensile test."], [("tensile test",)]),
+                )
 
 
 class TestPmdStableIdentity(unittest.TestCase):
-    TURTLE = (
-        PREFIXES
-        + PUBLICATION
-        + """<urn:a> a tto:TensileTest ; pmd:input <urn:piece-a> ;
-            pmd:characteristic <urn:n1>, <urn:n2> .
-        <urn:b> a pmd:TensileTest ; pmd:input <urn:piece-b>, <urn:piece-c> ;
-            pmd:characteristic <urn:n1> .
-        <urn:n1> a pmd:Norm ; pmd:value "ISO 2", " ISO 2" .
-        <urn:n2> a pmd:Norm ; pmd:value "DIN 1" .
-        <urn:c1> a pmd:MaterialDesignation ; pmd:value "S355", " S355 " .
-        <urn:c2> a pmd:materialDesignation ; pmd:value "b-steel", "S355" .
-        """
+    # Generation, turtle, the description it gives, and its misleading renames.
+    CASES = (
+        (
+            "pmdco2",
+            """<urn:a> a tto:TensileTest ; pmd:input <urn:piece-a> ;
+                pmd:characteristic <urn:n1>, <urn:n2> .
+            <urn:b> a pmd:TensileTest ; pmd:input <urn:piece-b>, <urn:piece-c> ;
+                pmd:characteristic <urn:n1> .
+            <urn:n1> a pmd:Norm ; pmd:value "ISO 2", " ISO 2" .
+            <urn:n2> a pmd:Norm ; pmd:value "DIN 1" .
+            <urn:c1> a pmd:MaterialDesignation ; pmd:value "S355", " S355 " .
+            <urn:c2> a pmd:materialDesignation ; pmd:value "b-steel", "S355" .
+            """,
+            "Data from 2 tensile tests. Materials: b-steel, S355."
+            " Test standards: DIN 1, ISO 2.",
+            (
+                ("urn:a>", "urn:material>"),
+                ("urn:b>", "urn:norm>"),
+                ("urn:n1>", "urn:tensile-test>"),
+                ("urn:c1>", "urn:S420>"),
+                ("urn:piece-a>", "urn:machine>"),
+            ),
+        ),
+        (
+            "pmdco3",
+            TENSILE_TEST_3
+            + MATERIAL_3
+            + STANDARD_3
+            + """<urn:other> a pmd:PMD_0000974 ; obo:OBI_0000293 <urn:piece> ;
+                obo:BFO_0000055 <urn:method> .
+            <urn:id> obo:OBI_0001938 <urn:spec2> .
+            <urn:spec2> pmd:PMD_0000006 " S355 ", "b-steel" .
+            """,
+            "Data from 2 tensile tests. Materials: b-steel, S355."
+            " Test standard: DIN EN ISO 6892-1.",
+            (
+                ("urn:test>", "urn:machine>"),
+                ("urn:steel>", "urn:aluminium>"),
+                ("urn:id>", "urn:label>"),
+                ("urn:method>", "urn:material>"),
+            ),
+        ),
     )
 
     def test_results_are_invariant_under_triple_reordering(self):
-        graph = Graph().parse(data=self.TURTLE, format="turtle")
-        reversed_graph = Graph()
-        for triple in reversed(sorted(graph, key=str)):
-            reversed_graph.add(triple)
-        first, second = (
-            harvest(item).select_subject_automatically()
-            for item in (graph, reversed_graph)
-        )
-        self.assertEqual(first.description.suggestions, second.description.suggestions)
-        self.assertEqual(first.keywords.suggestions, second.keywords.suggestions)
-        self.assertEqual(first.diagnostics, second.diagnostics)
-        self.assertEqual(
-            first.description.suggestions[0].value,
-            "Data from 2 tensile tests. Materials: b-steel, S355."
-            " Test standards: DIN 1, ISO 2.",
-        )
+        for generation, turtle, description, _ in self.CASES:
+            with self.subTest(generation=generation):
+                graph = Graph().parse(
+                    data=PREFIXES + PUBLICATION + turtle, format="turtle"
+                )
+                reversed_graph = Graph()
+                for triple in reversed(sorted(graph, key=str)):
+                    reversed_graph.add(triple)
+                first, second = (
+                    harvest(item).select_subject_automatically()
+                    for item in (graph, reversed_graph)
+                )
+                self.assertEqual(
+                    first.description.suggestions, second.description.suggestions
+                )
+                self.assertEqual(
+                    first.keywords.suggestions, second.keywords.suggestions
+                )
+                self.assertEqual(first.diagnostics, second.diagnostics)
+                self.assertEqual(first.description.suggestions[0].value, description)
 
     def test_changing_instance_identifiers_changes_no_value(self):
-        renamed = self.TURTLE
-        for old, new in (
-            ("urn:a>", "urn:material>"),
-            ("urn:b>", "urn:norm>"),
-            ("urn:n1>", "urn:tensile-test>"),
-            ("urn:c1>", "urn:S420>"),
-            ("urn:piece-a>", "urn:machine>"),
-        ):
-            renamed = renamed.replace(old, new)
-        first = harvest(self.TURTLE).select_subject_automatically()
-        second = harvest(renamed).select_subject_automatically()
-        self.assertEqual(offered(first), offered(second))
-        self.assertEqual(
-            [item.rule for item in first.description.suggestions[0].evidence],
-            [item.rule for item in second.description.suggestions[0].evidence],
-        )
+        for generation, turtle, description, renames in self.CASES:
+            with self.subTest(generation=generation):
+                renamed = turtle
+                for old, new in renames:
+                    self.assertIn(old, renamed)
+                    renamed = renamed.replace(old, new)
+                first, second = selected(turtle), selected(renamed)
+                self.assertEqual(offered(first), offered(second))
+                self.assertEqual(offered(second)[0], [description])
+                self.assertEqual(
+                    [item.rule for item in first.description.suggestions[0].evidence],
+                    [item.rule for item in second.description.suggestions[0].evidence],
+                )
 
 
 class TestPmdKeywordAcceptance(unittest.TestCase):
@@ -754,22 +799,6 @@ class TestPmdKeywordAcceptance(unittest.TestCase):
         )
         accepted = result.accept_suggestion(result.keywords.suggestions[0])
         self.assertEqual(accepted.to_publication_metadata().keywords, ("tensile test",))
-
-    def test_accepting_both_suggestions_publishes_them(self):
-        result = selected(TENSILE_TEST_2 + MATERIAL_2 + STANDARD_2)
-        accepted = result.accept_suggestion(
-            result.description.suggestions[0]
-        ).accept_suggestion(result.keywords.suggestions[0])
-        reviewed = accepted.with_overrides(creators=(Person(name="Jane Doe"),))
-        metadata = reviewed.to_publication_metadata()
-        self.assertEqual(
-            metadata.description,
-            "Data from 1 tensile test. Material: S355."
-            " Test standard: DIN EN ISO 6892-1.",
-        )
-        self.assertEqual(metadata.keywords, ("S355", "tensile test"))
-        self.assertEqual(reviewed.description.origin, "acceptance")
-        self.assertEqual(reviewed.keywords.origin, "acceptance")
 
     def test_reviewed_copy_accepts_and_a_later_override_replaces(self):
         result = selected(TENSILE_TEST_2)
@@ -1030,6 +1059,9 @@ class TestPmdco3TestStandardRule(unittest.TestCase):
                 ),
             ),
         )
+
+    def test_standard_is_not_a_keyword(self):
+        result = selected(TENSILE_TEST_3 + STANDARD_3)
         self.assertEqual(offered(result)[1], [("tensile test",)])
         self.assertEqual(result.keywords.suggestions[0].evidence, (TEST_EVIDENCE_3,))
 
@@ -1154,19 +1186,6 @@ class TestPmdGenerations(unittest.TestCase):
                     ["pmdco2_tensile_test", "pmdco3_tensile_test"],
                 )
 
-    def test_pmdco3_guard_reports_its_test_evidence(self):
-        result = harvest(
-            PREFIXES
-            + PUBLICATION
-            + TENSILE_TEST_3
-            + '<urn:table> a csvw:Table ; dct:title "T" .',
-            subject="urn:table",
-        )
-        self.assertEqual(offered(result), ([], []))
-        refusal = result.diagnostics[-1]
-        self.assertEqual(refusal.code, "pmd_subject_not_sole_candidate")
-        self.assertEqual(refusal.evidence, (TEST_EVIDENCE_3,))
-
     def test_other_generations_facts_do_not_apply_without_its_test(self):
         for turtle, rule in (
             (TENSILE_TEST_3 + MATERIAL_2, "pmdco3_tensile_test"),
@@ -1183,73 +1202,3 @@ class TestPmdGenerations(unittest.TestCase):
                     [rule],
                 )
                 self.assertEqual(result.diagnostics, selected("").diagnostics)
-
-    def test_material_or_method_without_a_pmdco3_test_changes_nothing(self):
-        for triples in (MATERIAL_3, STANDARD_3):
-            with self.subTest(triples=triples):
-                result = selected(triples)
-                self.assertEqual(offered(result), ([], []))
-                self.assertEqual(result.diagnostics, selected("").diagnostics)
-
-    def test_pmdco3_results_are_invariant_under_triple_reordering(self):
-        graph = Graph().parse(
-            data=PREFIXES
-            + PUBLICATION
-            + TENSILE_TEST_3
-            + MATERIAL_3
-            + STANDARD_3
-            + """<urn:other> a pmd:PMD_0000974 ; obo:OBI_0000293 <urn:piece> ;
-                obo:BFO_0000055 <urn:method> .
-            <urn:id> obo:OBI_0001938 <urn:spec2> .
-            <urn:spec2> pmd:PMD_0000006 " S355 ", "b-steel" .""",
-            format="turtle",
-        )
-        reversed_graph = Graph()
-        for triple in reversed(sorted(graph, key=str)):
-            reversed_graph.add(triple)
-        first, second = (
-            harvest(item).select_subject_automatically()
-            for item in (graph, reversed_graph)
-        )
-        self.assertEqual(first.description.suggestions, second.description.suggestions)
-        self.assertEqual(first.keywords.suggestions, second.keywords.suggestions)
-        self.assertEqual(
-            first.description.suggestions[0].value,
-            "Data from 2 tensile tests. Materials: b-steel, S355."
-            " Test standard: DIN EN ISO 6892-1.",
-        )
-
-    def test_changing_pmdco3_instance_identifiers_changes_no_value(self):
-        turtle = TENSILE_TEST_3 + MATERIAL_3 + STANDARD_3
-        renamed = turtle
-        for old, new in (
-            ("urn:test>", "urn:machine>"),
-            ("urn:steel>", "urn:aluminium>"),
-            ("urn:id>", "urn:label>"),
-            ("urn:method>", "urn:material>"),
-        ):
-            renamed = renamed.replace(old, new)
-        self.assertEqual(offered(selected(turtle)), offered(selected(renamed)))
-        self.assertEqual(
-            offered(selected(renamed))[0],
-            [
-                "Data from 1 tensile test. Material: S355."
-                " Test standard: DIN EN ISO 6892-1."
-            ],
-        )
-
-    def test_explicit_selection_of_the_sole_pmdco3_subject_equals_automatic(self):
-        turtle = PREFIXES + PUBLICATION + TENSILE_TEST_3 + MATERIAL_3 + STANDARD_3
-        automatic = harvest(turtle).select_subject_automatically()
-        explicit = harvest(turtle, subject="urn:publication")
-        self.assertEqual(len(explicit.description.suggestions), 1)
-        self.assertEqual(
-            explicit.description.suggestions, automatic.description.suggestions
-        )
-        self.assertEqual(explicit.keywords.suggestions, automatic.keywords.suggestions)
-
-    def test_pmdco3_keyword_suggestion_can_be_accepted(self):
-        result = selected(TENSILE_TEST_3 + MATERIAL_3)
-        accepted = result.accept_suggestion(result.keywords.suggestions[0])
-        self.assertEqual(accepted.keywords.value, ("S355", "tensile test"))
-        self.assertEqual(accepted.keywords.origin, "acceptance")
