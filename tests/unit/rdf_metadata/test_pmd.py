@@ -323,6 +323,9 @@ class TestPmdco2TestStandardRule(unittest.TestCase):
             '<urn:test> pmd:characteristic <urn:n> . <urn:n> a tto:Norm ; pmd:value "D" .',
             '<urn:test> pmd:Characteristic <urn:n> . <urn:n> a pmd:Norm ; pmd:value "D" .',
             '<urn:test> tto:characteristic <urn:n> . <urn:n> a pmd:Norm ; pmd:value "D" .',
+            '<urn:test> pmd:characteristic <urn:n> . <urn:n> a pmd:Norm ; pmd:Value "D" .',
+            '<urn:test> pmd:characteristic <urn:n> . <urn:n> a pmd:Norm ; tto:value "D" .',
+            '<urn:test> pmd:characteristic <urn:n> . <urn:n> a pmd:Norm ; rdfs:label "D" .',
         ):
             with self.subTest(triples=triples):
                 result = selected(TENSILE_TEST_2 + triples)
@@ -986,6 +989,7 @@ class TestPmdco3MaterialRule(unittest.TestCase):
             ("obo:OBI_0001938", "<http://purl.obolibrary.org/obo/obi_0001938>"),
             ("obo:OBI_0001938", "<https://w3id.org/pmd/co/OBI_0001938>"),
             ("pmd:PMD_0000006", "<https://w3id.org/pmd/co/pmd_0000006>"),
+            ("pmd:PMD_0000006", "<https://w3id.org/pmd/tto/PMD_0000006>"),
             ("pmd:PMD_0000006", "<https://w3id.org/pmd/co/value>"),
         ):
             with self.subTest(old=old, new=new):
@@ -1112,6 +1116,13 @@ class TestPmdco3TestStandardRule(unittest.TestCase):
             ("tto:TTO_0000054", "<https://w3id.org/pmd/tto/tto_0000054>"),
             ("tto:TTO_0000054", "<https://w3id.org/pmd/co/TTO_0000054>"),
             ("tto:TTO_0000054", "pmd:Norm"),
+            ("obo:IAO_0000219", "<http://purl.obolibrary.org/obo/iao_0000219>"),
+            ("obo:IAO_0000219", "<https://w3id.org/pmd/co/IAO_0000219>"),
+            ("obo:OBI_0001938", "<http://purl.obolibrary.org/obo/obi_0001938>"),
+            ("obo:OBI_0001938", "<https://w3id.org/pmd/co/OBI_0001938>"),
+            ("pmd:PMD_0000006", "<https://w3id.org/pmd/co/pmd_0000006>"),
+            ("pmd:PMD_0000006", "<https://w3id.org/pmd/tto/PMD_0000006>"),
+            ("pmd:PMD_0000006", "<https://w3id.org/pmd/co/value>"),
         ):
             with self.subTest(old=old, new=new):
                 self.assertIn(old, STANDARD_3)
