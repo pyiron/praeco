@@ -141,7 +141,7 @@ class TestPmdco2TensileTestRule(unittest.TestCase):
     def test_test_without_an_input_is_not_a_signature(self):
         result = selected("<urn:step> a tto:TensileTest ." + MATERIAL_2)
         self.assertEqual(offered(result), ([], []))
-        self.assertNotIn("pmd_subject_not_sole_candidate", codes(result))
+        self.assertEqual(result.diagnostics, selected("").diagnostics)
 
     def test_sub_step_without_an_input_is_not_counted(self):
         result = selected(TENSILE_TEST_2 + "<urn:step> a tto:TensileTest .")
@@ -548,6 +548,30 @@ class TestPmdNoSignature(unittest.TestCase):
                 result = selected(triples)
                 self.assertEqual(offered(result), ([], []))
                 self.assertEqual(result.diagnostics, selected("").diagnostics)
+
+    def test_typed_resource_without_an_input_gives_a_non_sole_subject_no_diagnostic(
+        self,
+    ):
+        for step, facts in (
+            ("<urn:step> a tto:TensileTest .", MATERIAL_2 + STANDARD_2),
+            ("<urn:step> a pmd:TensileTest .", MATERIAL_2 + STANDARD_2),
+            ("<urn:step> a pmd:PMD_0000974 .", MATERIAL_3 + STANDARD_3),
+        ):
+            turtle = (
+                PREFIXES
+                + PUBLICATION
+                + step
+                + facts
+                + '<urn:table> a csvw:Table ; dct:title "Table" .'
+            )
+            for term in ("urn:step", "urn:table"):
+                with self.subTest(step=step, term=term):
+                    result = harvest(turtle, subject=term)
+                    self.assertEqual(str(result.subject.term), term)
+                    self.assertEqual(offered(result), ([], []))
+                    self.assertEqual(
+                        [code for code in codes(result) if code.startswith("pmd_")], []
+                    )
 
     def test_review_example_has_no_suggestions_or_new_diagnostics(self):
         source = harvest(REVIEW_EXAMPLE)
