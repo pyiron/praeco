@@ -37,6 +37,29 @@ STANDARD_2 = """
 """
 
 
+TENSILE_TEST_3 = "<urn:test> a pmd:PMD_0000974 ; obo:OBI_0000293 <urn:piece> .\n"
+TEST_EVIDENCE_3 = Evidence(
+    "pmdco3_tensile_test",
+    (
+        ("<urn:test>", "<http://purl.obolibrary.org/obo/OBI_0000293>", "<urn:piece>"),
+        ("<urn:test>", RDF_TYPE, "<https://w3id.org/pmd/co/PMD_0000974>"),
+    ),
+)
+MATERIAL_3 = """
+<urn:id> obo:IAO_0000219 <urn:steel> .
+<urn:steel> a pmd:PMD_0020096 .
+<urn:id> obo:OBI_0001938 <urn:spec> .
+<urn:spec> pmd:PMD_0000006 "S355" .
+"""
+STANDARD_3 = """
+<urn:test> obo:BFO_0000055 <urn:method> .
+<urn:method> a tto:TTO_0000054 .
+<urn:method-id> obo:IAO_0000219 <urn:method> .
+<urn:method-id> obo:OBI_0001938 <urn:method-spec> .
+<urn:method-spec> pmd:PMD_0000006 "DIN EN ISO 6892-1" .
+"""
+
+
 def selected(turtle: str):
     return harvest(PREFIXES + turtle).select_subject_automatically()
 
@@ -782,3 +805,436 @@ class TestPmdKeywordAcceptance(unittest.TestCase):
         suggestion = source.select_subject_automatically().keywords.suggestions[0]
         with self.assertRaises(ValidationError):
             source.accept_suggestion(suggestion)
+
+
+class TestPmdco3TensileTestRule(unittest.TestCase):
+    def test_typed_resource_with_an_input_gives_a_test_with_exact_evidence(self):
+        result = selected(TENSILE_TEST_3)
+        self.assertEqual(
+            offered(result),
+            (["Data from 1 tensile test."], [("tensile test",)]),
+        )
+        self.assertEqual(result.description.suggestions[0].evidence, (TEST_EVIDENCE_3,))
+        self.assertEqual(result.keywords.suggestions[0].evidence, (TEST_EVIDENCE_3,))
+
+    def test_similar_test_class_iris_do_not_match(self):
+        for rdf_type in (
+            "https://w3id.org/pmd/co/pmd_0000974",
+            "https://w3id.org/pmd/tto/PMD_0000974",
+            "http://purl.obolibrary.org/obo/PMD_0000974",
+            "https://w3id.org/pmd/co/PMD_0000975",
+            "https://w3id.org/pmd/co/TensileTest",
+        ):
+            with self.subTest(rdf_type=rdf_type):
+                result = selected(
+                    f"<urn:test> a <{rdf_type}> ; obo:OBI_0000293 <urn:piece> ."
+                )
+                self.assertEqual(offered(result), ([], []))
+                self.assertEqual(result.diagnostics, selected("").diagnostics)
+
+    def test_similar_input_predicates_do_not_match(self):
+        for predicate in (
+            "http://purl.obolibrary.org/obo/obi_0000293",
+            "http://purl.obolibrary.org/obo/OBI_0000299",
+            "https://w3id.org/pmd/co/OBI_0000293",
+            "https://w3id.org/pmd/co/input",
+        ):
+            with self.subTest(predicate=predicate):
+                result = selected(
+                    f"<urn:test> a pmd:PMD_0000974 ; <{predicate}> <urn:piece> ."
+                )
+                self.assertEqual(offered(result), ([], []))
+
+    def test_test_without_an_input_is_not_a_signature(self):
+        result = selected("<urn:step> a pmd:PMD_0000974 ." + MATERIAL_3)
+        self.assertEqual(offered(result), ([], []))
+        self.assertEqual(result.diagnostics, selected("").diagnostics)
+
+    def test_count_excludes_sub_steps_and_is_plural_for_several_tests(self):
+        result = selected(
+            TENSILE_TEST_3
+            + """<urn:other> a pmd:PMD_0000974 ; obo:OBI_0000293 <urn:piece> .
+            <urn:step> a pmd:PMD_0000974 ."""
+        )
+        self.assertEqual(offered(result)[0], ["Data from 2 tensile tests."])
+
+
+class TestPmdco3MaterialRule(unittest.TestCase):
+    def test_identifier_of_a_steel_individual_gives_the_fact_with_exact_evidence(self):
+        result = selected(TENSILE_TEST_3 + MATERIAL_3)
+        self.assertEqual(
+            offered(result),
+            (
+                ["Data from 1 tensile test. Material: S355."],
+                [("S355", "tensile test")],
+            ),
+        )
+        expected = (
+            TEST_EVIDENCE_3,
+            Evidence(
+                "pmdco3_material",
+                (
+                    (
+                        "<urn:id>",
+                        "<http://purl.obolibrary.org/obo/IAO_0000219>",
+                        "<urn:steel>",
+                    ),
+                    (
+                        "<urn:id>",
+                        "<http://purl.obolibrary.org/obo/OBI_0001938>",
+                        "<urn:spec>",
+                    ),
+                    (
+                        "<urn:spec>",
+                        "<https://w3id.org/pmd/co/PMD_0000006>",
+                        '"S355"',
+                    ),
+                    ("<urn:steel>", RDF_TYPE, "<https://w3id.org/pmd/co/PMD_0020096>"),
+                ),
+            ),
+        )
+        self.assertEqual(result.description.suggestions[0].evidence, expected)
+        self.assertEqual(result.keywords.suggestions[0].evidence, expected)
+
+    def test_removing_a_required_triple_drops_the_sentence(self):
+        for removed in (
+            "<urn:id> obo:IAO_0000219 <urn:steel> .",
+            "<urn:steel> a pmd:PMD_0020096 .",
+            "<urn:id> obo:OBI_0001938 <urn:spec> .",
+            '<urn:spec> pmd:PMD_0000006 "S355" .',
+        ):
+            with self.subTest(removed=removed):
+                self.assertIn(removed, MATERIAL_3)
+                result = selected(TENSILE_TEST_3 + MATERIAL_3.replace(removed, ""))
+                self.assertEqual(
+                    offered(result),
+                    (["Data from 1 tensile test."], [("tensile test",)]),
+                )
+                self.assertEqual(
+                    result.description.suggestions[0].evidence, (TEST_EVIDENCE_3,)
+                )
+
+    def test_similar_terms_do_not_match(self):
+        for old, new in (
+            ("pmd:PMD_0020096", "<https://w3id.org/pmd/co/pmd_0020096>"),
+            ("pmd:PMD_0020096", "<https://w3id.org/pmd/tto/PMD_0020096>"),
+            ("obo:IAO_0000219", "<http://purl.obolibrary.org/obo/iao_0000219>"),
+            ("obo:IAO_0000219", "<https://w3id.org/pmd/co/IAO_0000219>"),
+            ("obo:OBI_0001938", "<http://purl.obolibrary.org/obo/obi_0001938>"),
+            ("obo:OBI_0001938", "<https://w3id.org/pmd/co/OBI_0001938>"),
+            ("pmd:PMD_0000006", "<https://w3id.org/pmd/co/pmd_0000006>"),
+            ("pmd:PMD_0000006", "<https://w3id.org/pmd/co/value>"),
+        ):
+            with self.subTest(old=old, new=new):
+                self.assertIn(old, MATERIAL_3)
+                result = selected(TENSILE_TEST_3 + MATERIAL_3.replace(old, new))
+                self.assertEqual(offered(result)[0], ["Data from 1 tensile test."])
+
+    def test_value_on_an_identifier_of_a_non_steel_individual_does_not_match(self):
+        result = selected(
+            TENSILE_TEST_3
+            + MATERIAL_3.replace(
+                "<urn:steel> a pmd:PMD_0020096 .",
+                "<urn:steel> a <https://w3id.org/pmd/co/PMD_0020097> ;"
+                ' rdfs:label "steel" .',
+            )
+        )
+        self.assertEqual(
+            offered(result), (["Data from 1 tensile test."], [("tensile test",)])
+        )
+
+    def test_porosity_link_from_a_test_piece_does_not_make_a_material(self):
+        result = selected(TENSILE_TEST_3 + """<urn:piece> pmd:PMD_0020005 <urn:other> .
+            <urn:id> obo:IAO_0000219 <urn:other> ; obo:OBI_0001938 <urn:spec> .
+            <urn:spec> pmd:PMD_0000006 "S355" .""")
+        self.assertEqual(offered(result)[0], ["Data from 1 tensile test."])
+
+    def test_label_or_identifier_saying_material_is_not_a_fact(self):
+        result = selected(
+            TENSILE_TEST_3
+            + """<urn:material> rdfs:label "material" ; pmd:PMD_0000006 "S355" ;
+                a <https://w3id.org/pmd/co/PMD_0000000> ."""
+        )
+        self.assertEqual(offered(result)[0], ["Data from 1 tensile test."])
+
+    def test_material_values_are_trimmed_merged_and_sorted(self):
+        result = selected(
+            TENSILE_TEST_3 + MATERIAL_3 + """<urn:id> obo:OBI_0001938 <urn:spec2> .
+            <urn:spec2> pmd:PMD_0000006 " S355 ", "b-steel", "  ", <urn:v>, [] ."""
+        )
+        self.assertEqual(
+            offered(result),
+            (
+                ["Data from 1 tensile test. Materials: b-steel, S355."],
+                [("b-steel", "S355", "tensile test")],
+            ),
+        )
+        triples = result.keywords.suggestions[0].evidence[1].triples
+        self.assertEqual(
+            [item[2] for item in triples if item[0] == "<urn:spec2>"],
+            ['" S355 "', '"b-steel"'],
+        )
+
+
+class TestPmdco3TestStandardRule(unittest.TestCase):
+    def test_method_realized_by_a_test_gives_the_fact_with_exact_evidence(self):
+        result = selected(TENSILE_TEST_3 + STANDARD_3)
+        suggestion = result.description.suggestions[0]
+        self.assertEqual(
+            suggestion.value,
+            "Data from 1 tensile test. Test standard: DIN EN ISO 6892-1.",
+        )
+        self.assertEqual(
+            suggestion.evidence,
+            (
+                TEST_EVIDENCE_3,
+                Evidence(
+                    "pmdco3_test_standard",
+                    (
+                        (
+                            "<urn:method-id>",
+                            "<http://purl.obolibrary.org/obo/IAO_0000219>",
+                            "<urn:method>",
+                        ),
+                        (
+                            "<urn:method-id>",
+                            "<http://purl.obolibrary.org/obo/OBI_0001938>",
+                            "<urn:method-spec>",
+                        ),
+                        (
+                            "<urn:method-spec>",
+                            "<https://w3id.org/pmd/co/PMD_0000006>",
+                            '"DIN EN ISO 6892-1"',
+                        ),
+                        (
+                            "<urn:method>",
+                            RDF_TYPE,
+                            "<https://w3id.org/pmd/tto/TTO_0000054>",
+                        ),
+                        (
+                            "<urn:test>",
+                            "<http://purl.obolibrary.org/obo/BFO_0000055>",
+                            "<urn:method>",
+                        ),
+                    ),
+                ),
+            ),
+        )
+        self.assertEqual(offered(result)[1], [("tensile test",)])
+        self.assertEqual(result.keywords.suggestions[0].evidence, (TEST_EVIDENCE_3,))
+
+    def test_removing_a_required_triple_drops_the_sentence(self):
+        for removed in (
+            "<urn:test> obo:BFO_0000055 <urn:method> .",
+            "<urn:method> a tto:TTO_0000054 .",
+            "<urn:method-id> obo:IAO_0000219 <urn:method> .",
+            "<urn:method-id> obo:OBI_0001938 <urn:method-spec> .",
+            '<urn:method-spec> pmd:PMD_0000006 "DIN EN ISO 6892-1" .',
+        ):
+            with self.subTest(removed=removed):
+                self.assertIn(removed, STANDARD_3)
+                result = selected(TENSILE_TEST_3 + STANDARD_3.replace(removed, ""))
+                self.assertEqual(offered(result)[0], ["Data from 1 tensile test."])
+                self.assertEqual(
+                    result.description.suggestions[0].evidence, (TEST_EVIDENCE_3,)
+                )
+
+    def test_similar_terms_do_not_match(self):
+        for old, new in (
+            ("obo:BFO_0000055", "<http://purl.obolibrary.org/obo/bfo_0000055>"),
+            ("obo:BFO_0000055", "<https://w3id.org/pmd/co/BFO_0000055>"),
+            ("tto:TTO_0000054", "<https://w3id.org/pmd/tto/tto_0000054>"),
+            ("tto:TTO_0000054", "<https://w3id.org/pmd/co/TTO_0000054>"),
+            ("tto:TTO_0000054", "pmd:Norm"),
+        ):
+            with self.subTest(old=old, new=new):
+                self.assertIn(old, STANDARD_3)
+                result = selected(TENSILE_TEST_3 + STANDARD_3.replace(old, new))
+                self.assertEqual(offered(result)[0], ["Data from 1 tensile test."])
+
+    def test_methods_outside_a_counted_test_do_not_match(self):
+        for owner in (
+            "<urn:machine> a <https://w3id.org/pmd/co/PMD_0000001> ;",
+            "<urn:extensometer> a <https://w3id.org/pmd/co/PMD_0000002> ;",
+            "<urn:step> a pmd:PMD_0000974 ;",
+        ):
+            with self.subTest(owner=owner):
+                result = selected(
+                    TENSILE_TEST_3
+                    + owner
+                    + " obo:BFO_0000055 <urn:method> ."
+                    + STANDARD_3.replace(
+                        "<urn:test> obo:BFO_0000055 <urn:method> .", ""
+                    )
+                )
+                self.assertEqual(offered(result)[0], ["Data from 1 tensile test."])
+
+    def test_invalid_values_drop_the_sentence(self):
+        for value in ('""', '"  "', "<urn:value>", "[]"):
+            with self.subTest(value=value):
+                result = selected(
+                    TENSILE_TEST_3 + STANDARD_3.replace('"DIN EN ISO 6892-1"', value)
+                )
+                self.assertEqual(offered(result)[0], ["Data from 1 tensile test."])
+
+    def test_several_standards_are_listed_sorted(self):
+        result = selected(
+            TENSILE_TEST_3
+            + STANDARD_3
+            + """<urn:other-id> obo:IAO_0000219 <urn:method> ;
+                obo:OBI_0001938 <urn:other-spec> .
+            <urn:other-spec> pmd:PMD_0000006 "ASTM E8" ."""
+        )
+        self.assertEqual(
+            offered(result)[0],
+            [
+                "Data from 1 tensile test."
+                " Test standards: ASTM E8, DIN EN ISO 6892-1."
+            ],
+        )
+
+
+class TestPmdGenerations(unittest.TestCase):
+    def test_both_generations_give_a_non_blocking_conflict(self):
+        result = selected(
+            TENSILE_TEST_2 + MATERIAL_2 + STANDARD_2 + TENSILE_TEST_3 + MATERIAL_3
+        )
+        self.assertEqual(offered(result), ([], []))
+        conflict = result.diagnostics[-1]
+        self.assertEqual(conflict.code, "pmd_generation_conflict")
+        self.assertIsNone(conflict.field)
+        self.assertEqual(str(conflict.subject), "urn:publication")
+        self.assertFalse(conflict.blocking)
+        self.assertEqual(
+            [item.rule for item in conflict.evidence],
+            ["pmdco2_tensile_test", "pmdco3_tensile_test"],
+        )
+        self.assertNotIn("pmd_subject_not_sole_candidate", codes(result))
+
+    def test_conflict_leaves_generic_extraction_and_conversion_usable(self):
+        result = selected(
+            '<urn:publication> dct:description "Observed" ; dct:creator "Jane Doe" .'
+            + TENSILE_TEST_2
+            + TENSILE_TEST_3
+        )
+        self.assertEqual(result.title.value, "Title")
+        self.assertEqual(result.description.value, "Observed")
+        self.assertEqual(codes(result), ["pmd_generation_conflict"])
+        self.assertEqual(result.to_publication_metadata().description, "Observed")
+
+    def test_conflict_on_a_non_sole_subject_reports_both_conditions(self):
+        result = harvest(
+            PREFIXES
+            + TENSILE_TEST_2
+            + TENSILE_TEST_3
+            + '<urn:table> a csvw:Table ; dct:title "Table" .',
+            subject="urn:table",
+        )
+        self.assertEqual(offered(result), ([], []))
+        pmd = [item for item in result.diagnostics if item.code.startswith("pmd_")]
+        self.assertEqual(
+            [item.code for item in pmd],
+            ["pmd_generation_conflict", "pmd_subject_not_sole_candidate"],
+        )
+        for item in pmd:
+            with self.subTest(code=item.code):
+                self.assertEqual(
+                    [evidence.rule for evidence in item.evidence],
+                    ["pmdco2_tensile_test", "pmdco3_tensile_test"],
+                )
+
+    def test_pmdco3_guard_reports_its_test_evidence(self):
+        result = harvest(
+            PREFIXES + TENSILE_TEST_3 + '<urn:table> a csvw:Table ; dct:title "T" .',
+            subject="urn:table",
+        )
+        self.assertEqual(offered(result), ([], []))
+        refusal = result.diagnostics[-1]
+        self.assertEqual(refusal.code, "pmd_subject_not_sole_candidate")
+        self.assertEqual(refusal.evidence, (TEST_EVIDENCE_3,))
+
+    def test_other_generations_facts_do_not_apply_without_its_test(self):
+        for turtle, rule in (
+            (TENSILE_TEST_3 + MATERIAL_2, "pmdco3_tensile_test"),
+            (TENSILE_TEST_2 + MATERIAL_3, "pmdco2_tensile_test"),
+        ):
+            with self.subTest(rule=rule):
+                result = selected(turtle)
+                self.assertEqual(
+                    offered(result),
+                    (["Data from 1 tensile test."], [("tensile test",)]),
+                )
+                self.assertEqual(
+                    [item.rule for item in result.description.suggestions[0].evidence],
+                    [rule],
+                )
+                self.assertEqual(result.diagnostics, selected("").diagnostics)
+
+    def test_material_or_method_without_a_pmdco3_test_changes_nothing(self):
+        for triples in (MATERIAL_3, STANDARD_3):
+            with self.subTest(triples=triples):
+                result = selected(triples)
+                self.assertEqual(offered(result), ([], []))
+                self.assertEqual(result.diagnostics, selected("").diagnostics)
+
+    def test_pmdco3_results_are_invariant_under_triple_reordering(self):
+        graph = Graph().parse(
+            data=PREFIXES
+            + TENSILE_TEST_3
+            + MATERIAL_3
+            + STANDARD_3
+            + """<urn:other> a pmd:PMD_0000974 ; obo:OBI_0000293 <urn:piece> ;
+                obo:BFO_0000055 <urn:method> .
+            <urn:id> obo:OBI_0001938 <urn:spec2> .
+            <urn:spec2> pmd:PMD_0000006 " S355 ", "b-steel" .""",
+            format="turtle",
+        )
+        reversed_graph = Graph()
+        for triple in reversed(sorted(graph, key=str)):
+            reversed_graph.add(triple)
+        first, second = (
+            harvest(item).select_subject_automatically()
+            for item in (graph, reversed_graph)
+        )
+        self.assertEqual(first.description.suggestions, second.description.suggestions)
+        self.assertEqual(first.keywords.suggestions, second.keywords.suggestions)
+        self.assertEqual(
+            first.description.suggestions[0].value,
+            "Data from 2 tensile tests. Materials: b-steel, S355."
+            " Test standard: DIN EN ISO 6892-1.",
+        )
+
+    def test_changing_pmdco3_instance_identifiers_changes_no_value(self):
+        turtle = TENSILE_TEST_3 + MATERIAL_3 + STANDARD_3
+        renamed = turtle
+        for old, new in (
+            ("urn:test>", "urn:machine>"),
+            ("urn:steel>", "urn:aluminium>"),
+            ("urn:id>", "urn:label>"),
+            ("urn:method>", "urn:material>"),
+        ):
+            renamed = renamed.replace(old, new)
+        self.assertEqual(offered(selected(turtle)), offered(selected(renamed)))
+        self.assertEqual(
+            offered(selected(renamed))[0],
+            [
+                "Data from 1 tensile test. Material: S355."
+                " Test standard: DIN EN ISO 6892-1."
+            ],
+        )
+
+    def test_explicit_selection_of_the_sole_pmdco3_subject_equals_automatic(self):
+        turtle = PREFIXES + TENSILE_TEST_3 + MATERIAL_3 + STANDARD_3
+        automatic = harvest(turtle).select_subject_automatically()
+        explicit = harvest(turtle, subject="urn:publication")
+        self.assertEqual(len(explicit.description.suggestions), 1)
+        self.assertEqual(
+            explicit.description.suggestions, automatic.description.suggestions
+        )
+        self.assertEqual(explicit.keywords.suggestions, automatic.keywords.suggestions)
+
+    def test_pmdco3_keyword_suggestion_can_be_accepted(self):
+        result = selected(TENSILE_TEST_3 + MATERIAL_3)
+        accepted = result.accept_suggestion(result.keywords.suggestions[0])
+        self.assertEqual(accepted.keywords.value, ("S355", "tensile test"))
+        self.assertEqual(accepted.keywords.origin, "acceptance")

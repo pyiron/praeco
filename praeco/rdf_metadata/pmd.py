@@ -18,6 +18,7 @@ from praeco.rdf_metadata.models import Diagnostic, Evidence, Suggestion
 
 _PMD = "https://w3id.org/pmd/co/"
 _TTO = "https://w3id.org/pmd/tto/"
+_OBO = "http://purl.obolibrary.org/obo/"
 
 # Each pair lists the declared IRI, then the undeclared one used by real data.
 _PMDCO2_TEST_TYPES = (URIRef(_TTO + "TensileTest"), URIRef(_PMD + "TensileTest"))
@@ -29,6 +30,16 @@ _PMDCO2_NORM = URIRef(_PMD + "Norm")
 _PMDCO2_INPUT = URIRef(_PMD + "input")
 _PMDCO2_CHARACTERISTIC = URIRef(_PMD + "characteristic")
 _PMDCO2_VALUE = URIRef(_PMD + "value")
+
+_PMDCO3_TEST_TYPE = URIRef(_PMD + "PMD_0000974")
+# Only steel: the generic route to a material is a term labelled "porosity".
+_PMDCO3_STEEL = URIRef(_PMD + "PMD_0020096")
+_PMDCO3_TEST_METHOD = URIRef(_TTO + "TTO_0000054")
+_PMDCO3_INPUT = URIRef(_OBO + "OBI_0000293")
+_PMDCO3_REALIZES = URIRef(_OBO + "BFO_0000055")
+_PMDCO3_DENOTES = URIRef(_OBO + "IAO_0000219")
+_PMDCO3_VALUE_SPECIFICATION = URIRef(_OBO + "OBI_0001938")
+_PMDCO3_HAS_VALUE = URIRef(_PMD + "PMD_0000006")
 
 _Triple = tuple[Node, Node, Node]
 
@@ -96,6 +107,54 @@ def _pmdco2_standards(graph: Graph, tests: Iterable[Node]) -> _Fact:
                     ),
                 )
     return _Fact("pmdco2_test_standard", values)
+
+
+def _add_denoted_values(
+    graph: Graph,
+    values: dict[str, set[_Triple]],
+    denoted: Node,
+    path: tuple[_Triple, ...],
+) -> None:
+    """Record the values specified by the identifiers denoting a resource."""
+    for identifier in graph.subjects(_PMDCO3_DENOTES, denoted):
+        for specification in graph.objects(identifier, _PMDCO3_VALUE_SPECIFICATION):
+            for value in graph.objects(specification, _PMDCO3_HAS_VALUE):
+                _add_value(
+                    values,
+                    value,
+                    (
+                        *path,
+                        (identifier, _PMDCO3_DENOTES, denoted),
+                        (identifier, _PMDCO3_VALUE_SPECIFICATION, specification),
+                        (specification, _PMDCO3_HAS_VALUE, value),
+                    ),
+                )
+
+
+def _pmdco3_materials(graph: Graph) -> _Fact:
+    values: dict[str, set[_Triple]] = {}
+    for material in graph.subjects(RDF.type, _PMDCO3_STEEL):
+        _add_denoted_values(
+            graph, values, material, ((material, RDF.type, _PMDCO3_STEEL),)
+        )
+    return _Fact("pmdco3_material", values)
+
+
+def _pmdco3_standards(graph: Graph, tests: Iterable[Node]) -> _Fact:
+    values: dict[str, set[_Triple]] = {}
+    for test in tests:
+        for method in graph.objects(test, _PMDCO3_REALIZES):
+            if (method, RDF.type, _PMDCO3_TEST_METHOD) in graph:
+                _add_denoted_values(
+                    graph,
+                    values,
+                    method,
+                    (
+                        (test, _PMDCO3_REALIZES, method),
+                        (method, RDF.type, _PMDCO3_TEST_METHOD),
+                    ),
+                )
+    return _Fact("pmdco3_test_standard", values)
 
 
 def _evidence(*facts: _Fact) -> tuple[Evidence, ...]:
@@ -166,11 +225,26 @@ def derive_pmd_suggestions(
 
     Without a signature there is neither a suggestion nor a diagnostic.
     """
-    tests = _tests(graph, "pmdco2_tensile_test", _PMDCO2_TEST_TYPES, _PMDCO2_INPUT)
-    if not tests.support:
+    pmdco2 = _tests(graph, "pmdco2_tensile_test", _PMDCO2_TEST_TYPES, _PMDCO2_INPUT)
+    pmdco3 = _tests(graph, "pmdco3_tensile_test", (_PMDCO3_TEST_TYPE,), _PMDCO3_INPUT)
+    if not pmdco2.support and not pmdco3.support:
         return (), ()
+    evidence = _evidence(pmdco2, pmdco3)
+    diagnostics: list[Diagnostic] = []
+    if pmdco2.support and pmdco3.support:
+        diagnostics.append(
+            Diagnostic(
+                "pmd_generation_conflict",
+                None,
+                subject,
+                "The file matches both the PMDco 2 and the PMDco 3 tensile-test "
+                "patterns, so no PMD suggestions are offered.",
+                False,
+                evidence,
+            )
+        )
     if not sole_candidate:
-        return (), (
+        diagnostics.append(
             Diagnostic(
                 "pmd_subject_not_sole_candidate",
                 None,
@@ -178,9 +252,15 @@ def derive_pmd_suggestions(
                 "PMD tensile-test patterns summarize the whole file, so suggestions "
                 "are offered only to its single eligible publication subject.",
                 False,
-                _evidence(tests),
-            ),
+                evidence,
+            )
         )
-    materials = _pmdco2_materials(graph)
-    standards = _pmdco2_standards(graph, tests.support)
-    return _compose(tests, materials, standards, subject, context), ()
+    if diagnostics:
+        return (), tuple(diagnostics)
+    if pmdco2.support:
+        materials = _pmdco2_materials(graph)
+        standards = _pmdco2_standards(graph, pmdco2.support)
+        return _compose(pmdco2, materials, standards, subject, context), ()
+    materials = _pmdco3_materials(graph)
+    standards = _pmdco3_standards(graph, pmdco3.support)
+    return _compose(pmdco3, materials, standards, subject, context), ()
