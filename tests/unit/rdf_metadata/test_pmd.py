@@ -19,8 +19,8 @@ PREFIXES = """
 @prefix pmd: <https://w3id.org/pmd/co/> .
 @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
 @prefix tto: <https://w3id.org/pmd/tto/> .
-<urn:publication> a owl:Ontology ; dct:title "Title" .
 """
+PUBLICATION = '<urn:publication> a owl:Ontology ; dct:title "Title" .\n'
 RDF_TYPE = "<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>"
 TENSILE_TEST_2 = "<urn:test> a tto:TensileTest ; pmd:input <urn:piece> .\n"
 TEST_EVIDENCE_2 = Evidence(
@@ -61,7 +61,8 @@ STANDARD_3 = """
 
 
 def selected(turtle: str):
-    return harvest(PREFIXES + turtle).select_subject_automatically()
+    """Select automatically, with PUBLICATION as the file's own publication."""
+    return harvest(PREFIXES + PUBLICATION + turtle).select_subject_automatically()
 
 
 def offered(result) -> tuple[list[str], list[tuple[str, ...]]]:
@@ -576,6 +577,7 @@ class TestPmdSubjectGuard(unittest.TestCase):
     def test_two_eligible_subjects_refuse_explicit_selection_of_either(self):
         turtle = (
             PREFIXES
+            + PUBLICATION
             + TENSILE_TEST_2
             + '<urn:other> a dcat:Dataset ; dct:title "Other" .'
         )
@@ -585,9 +587,12 @@ class TestPmdSubjectGuard(unittest.TestCase):
                 self.assert_refused(harvest(turtle).select_subject(term), term)
 
     def test_two_eligible_subjects_leave_automatic_selection_unselected(self):
-        result = selected(
-            TENSILE_TEST_2 + '<urn:other> a dcat:Dataset ; dct:title "Other" .'
-        )
+        result = harvest(
+            PREFIXES
+            + PUBLICATION
+            + TENSILE_TEST_2
+            + '<urn:other> a dcat:Dataset ; dct:title "Other" .'
+        ).select_subject_automatically()
         self.assertIsNone(result.subject)
         self.assertEqual(codes(result), ["subject_ambiguous"])
         self.assertEqual(offered(result), ([], []))
@@ -595,6 +600,7 @@ class TestPmdSubjectGuard(unittest.TestCase):
     def test_explicitly_selected_non_eligible_subjects_are_refused(self):
         turtle = (
             PREFIXES
+            + PUBLICATION
             + TENSILE_TEST_2
             + """<urn:table> a csvw:Table ; dct:title "Table" .
             <urn:resource> rdfs:label "Resource" ."""
@@ -605,9 +611,7 @@ class TestPmdSubjectGuard(unittest.TestCase):
 
     def test_subject_is_refused_when_no_subject_is_eligible(self):
         result = harvest(
-            """<urn:resource> <http://www.w3.org/2000/01/rdf-schema#label> "Resource" .
-            <urn:test> a <https://w3id.org/pmd/tto/TensileTest> ;
-                <https://w3id.org/pmd/co/input> <urn:piece> .""",
+            PREFIXES + TENSILE_TEST_2 + '<urn:resource> rdfs:label "Resource" .',
             subject="urn:resource",
         )
         self.assert_refused(result, "urn:resource")
@@ -615,6 +619,7 @@ class TestPmdSubjectGuard(unittest.TestCase):
     def test_explicit_selection_of_the_sole_subject_equals_automatic(self):
         turtle = (
             PREFIXES
+            + PUBLICATION
             + TENSILE_TEST_2
             + MATERIAL_2
             + STANDARD_2
@@ -639,6 +644,7 @@ class TestPmdSubjectGuard(unittest.TestCase):
     def test_refusal_does_not_block_conversion(self):
         result = harvest(
             PREFIXES
+            + PUBLICATION
             + TENSILE_TEST_2
             + '<urn:table> a csvw:Table ; dct:title "Table" .',
             subject="urn:table",
@@ -650,7 +656,7 @@ class TestPmdSubjectGuard(unittest.TestCase):
         self.assertEqual(reviewed.to_publication_metadata().title, "Table")
 
     def test_absent_subject_runs_no_rule_and_stays_selectable(self):
-        result = harvest(PREFIXES + TENSILE_TEST_2, subject="urn:absent")
+        result = harvest(PREFIXES + PUBLICATION + TENSILE_TEST_2, subject="urn:absent")
         self.assertEqual(codes(result), ["subject_not_found"])
         self.assertEqual(
             offered(result.select_subject("urn:publication")),
@@ -659,7 +665,10 @@ class TestPmdSubjectGuard(unittest.TestCase):
 
 
 class TestPmdStableIdentity(unittest.TestCase):
-    TURTLE = PREFIXES + """<urn:a> a tto:TensileTest ; pmd:input <urn:piece-a> ;
+    TURTLE = (
+        PREFIXES
+        + PUBLICATION
+        + """<urn:a> a tto:TensileTest ; pmd:input <urn:piece-a> ;
             pmd:characteristic <urn:n1>, <urn:n2> .
         <urn:b> a pmd:TensileTest ; pmd:input <urn:piece-b>, <urn:piece-c> ;
             pmd:characteristic <urn:n1> .
@@ -668,6 +677,7 @@ class TestPmdStableIdentity(unittest.TestCase):
         <urn:c1> a pmd:MaterialDesignation ; pmd:value "S355", " S355 " .
         <urn:c2> a pmd:materialDesignation ; pmd:value "b-steel", "S355" .
         """
+    )
 
     def test_results_are_invariant_under_triple_reordering(self):
         graph = Graph().parse(data=self.TURTLE, format="turtle")
@@ -793,7 +803,7 @@ class TestPmdKeywordAcceptance(unittest.TestCase):
         self.assertEqual(result.keywords.status, "missing")
 
     def test_record_of_another_subject_is_rejected(self):
-        source = harvest(PREFIXES + TENSILE_TEST_2)
+        source = harvest(PREFIXES + PUBLICATION + TENSILE_TEST_2)
         suggestion = source.select_subject("urn:publication").keywords.suggestions[0]
         other = source.select_subject("urn:test")
         with self.assertRaises(ValidationError):
@@ -801,7 +811,7 @@ class TestPmdKeywordAcceptance(unittest.TestCase):
         self.assertEqual(other.keywords.status, "missing")
 
     def test_unselected_harvest_rejects_a_record(self):
-        source = harvest(PREFIXES + TENSILE_TEST_2)
+        source = harvest(PREFIXES + PUBLICATION + TENSILE_TEST_2)
         suggestion = source.select_subject_automatically().keywords.suggestions[0]
         with self.assertRaises(ValidationError):
             source.accept_suggestion(suggestion)
@@ -1125,6 +1135,7 @@ class TestPmdGenerations(unittest.TestCase):
     def test_conflict_on_a_non_sole_subject_reports_both_conditions(self):
         result = harvest(
             PREFIXES
+            + PUBLICATION
             + TENSILE_TEST_2
             + TENSILE_TEST_3
             + '<urn:table> a csvw:Table ; dct:title "Table" .',
@@ -1145,7 +1156,10 @@ class TestPmdGenerations(unittest.TestCase):
 
     def test_pmdco3_guard_reports_its_test_evidence(self):
         result = harvest(
-            PREFIXES + TENSILE_TEST_3 + '<urn:table> a csvw:Table ; dct:title "T" .',
+            PREFIXES
+            + PUBLICATION
+            + TENSILE_TEST_3
+            + '<urn:table> a csvw:Table ; dct:title "T" .',
             subject="urn:table",
         )
         self.assertEqual(offered(result), ([], []))
@@ -1180,6 +1194,7 @@ class TestPmdGenerations(unittest.TestCase):
     def test_pmdco3_results_are_invariant_under_triple_reordering(self):
         graph = Graph().parse(
             data=PREFIXES
+            + PUBLICATION
             + TENSILE_TEST_3
             + MATERIAL_3
             + STANDARD_3
@@ -1224,7 +1239,7 @@ class TestPmdGenerations(unittest.TestCase):
         )
 
     def test_explicit_selection_of_the_sole_pmdco3_subject_equals_automatic(self):
-        turtle = PREFIXES + TENSILE_TEST_3 + MATERIAL_3 + STANDARD_3
+        turtle = PREFIXES + PUBLICATION + TENSILE_TEST_3 + MATERIAL_3 + STANDARD_3
         automatic = harvest(turtle).select_subject_automatically()
         explicit = harvest(turtle, subject="urn:publication")
         self.assertEqual(len(explicit.description.suggestions), 1)
