@@ -112,8 +112,15 @@ class TestPmdReferenceCorpus(unittest.TestCase):
             ],
         )
         self.assertEqual(
-            [item.rule for item in description.suggestions[0].evidence],
-            ["pmdco2_tensile_test", "pmdco2_material", "pmdco2_test_standard"],
+            [
+                (item.rule, len(item.triples))
+                for item in description.suggestions[0].evidence
+            ],
+            [
+                ("pmdco2_tensile_test", 20),
+                ("pmdco2_material", 20),
+                ("pmdco2_test_standard", 12),
+            ],
         )
         self.assertIn(
             (
@@ -131,8 +138,11 @@ class TestPmdReferenceCorpus(unittest.TestCase):
             [("S355", "tensile test")],
         )
         self.assertEqual(
-            [item.rule for item in keywords.suggestions[0].evidence],
-            ["pmdco2_tensile_test", "pmdco2_material"],
+            [
+                (item.rule, len(item.triples))
+                for item in keywords.suggestions[0].evidence
+            ],
+            [("pmdco2_tensile_test", 20), ("pmdco2_material", 20)],
         )
         self.assertEqual((keywords.value, keywords.status), (None, "missing"))
 
@@ -234,8 +244,15 @@ class TestPmdReferenceCorpus(unittest.TestCase):
             ],
         )
         self.assertEqual(
-            [item.rule for item in description.suggestions[0].evidence],
-            ["pmdco3_tensile_test", "pmdco3_material", "pmdco3_test_standard"],
+            [
+                (item.rule, len(item.triples))
+                for item in description.suggestions[0].evidence
+            ],
+            [
+                ("pmdco3_tensile_test", 20),
+                ("pmdco3_material", 40),
+                ("pmdco3_test_standard", 50),
+            ],
         )
         self.assertIn(
             (
@@ -253,8 +270,11 @@ class TestPmdReferenceCorpus(unittest.TestCase):
             [("S355", "tensile test")],
         )
         self.assertEqual(
-            [item.rule for item in keywords.suggestions[0].evidence],
-            ["pmdco3_tensile_test", "pmdco3_material"],
+            [
+                (item.rule, len(item.triples))
+                for item in keywords.suggestions[0].evidence
+            ],
+            [("pmdco3_tensile_test", 20), ("pmdco3_material", 40)],
         )
         self.assertEqual((keywords.value, keywords.status), (None, "missing"))
 

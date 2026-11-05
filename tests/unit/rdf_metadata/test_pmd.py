@@ -2,7 +2,7 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 
-from rdflib import Graph
+from rdflib import BNode, Graph
 
 from praeco import Person
 from praeco.exceptions import ValidationError
@@ -19,6 +19,7 @@ PREFIXES = """
 @prefix pmd: <https://w3id.org/pmd/co/> .
 @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
 @prefix tto: <https://w3id.org/pmd/tto/> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
 """
 PUBLICATION = '<urn:publication> a owl:Ontology ; dct:title "Title" .\n'
 RDF_TYPE = "<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>"
@@ -468,6 +469,45 @@ class TestPmdValueHandling(unittest.TestCase):
             ),
         )
 
+    def test_non_string_typed_literals_are_values(self):
+        xsd = "http://www.w3.org/2001/XMLSchema#"
+        for obj, text, keywords, term in (
+            (
+                '"355"^^xsd:integer',
+                "355",
+                ("355", "tensile test"),
+                f'"355"^^<{xsd}integer>',
+            ),
+            ("355", "355", ("355", "tensile test"), f'"355"^^<{xsd}integer>'),
+            ("true", "true", ("tensile test", "true"), f'"true"^^<{xsd}boolean>'),
+            (
+                '"2021-01-01"^^xsd:date',
+                "2021-01-01",
+                ("2021-01-01", "tensile test"),
+                f'"2021-01-01"^^<{xsd}date>',
+            ),
+        ):
+            for turtle in (
+                TENSILE_TEST_2
+                + f"<urn:c> a pmd:MaterialDesignation ; pmd:value {obj} .",
+                TENSILE_TEST_3 + MATERIAL_3.replace('"S355"', obj),
+            ):
+                with self.subTest(turtle=turtle):
+                    result = selected(turtle)
+                    self.assertEqual(
+                        offered(result),
+                        ([f"Data from 1 tensile test. Material: {text}."], [keywords]),
+                    )
+                    self.assertIn(
+                        term,
+                        [
+                            triple[2]
+                            for triple in result.keywords.suggestions[0]
+                            .evidence[1]
+                            .triples
+                        ],
+                    )
+
     def test_material_equal_to_the_process_keyword_is_deduplicated(self):
         result = selected(
             TENSILE_TEST_2
@@ -531,6 +571,42 @@ class TestPmdSuggestionBoundary(unittest.TestCase):
                 [("S355", "tensile test")],
             ),
         )
+
+    def test_candidate_selection_leaves_the_description_suggestion_available(self):
+        result = selected(
+            '<urn:publication> dct:description "X", "Y" .' + TENSILE_TEST_2
+        )
+        review = result.description
+        self.assertEqual(review.status, "unresolved")
+
+        chosen = result.select_candidate(review.candidates[0]).description
+
+        self.assertEqual(chosen.value, "X")
+        self.assertEqual(chosen.origin, "selection")
+        self.assertIs(chosen.selection, review.candidates[0])
+        self.assertEqual(chosen.suggestions, review.suggestions)
+
+    def test_candidate_selection_replaces_an_accepted_description_suggestion(self):
+        result = selected(
+            '<urn:publication> dct:description "X", "Y" .' + TENSILE_TEST_2
+        )
+        review = result.description
+        suggestion = review.suggestions[0]
+
+        accepted = result.accept_suggestion(suggestion)
+
+        self.assertEqual(accepted.description.value, "Data from 1 tensile test.")
+        self.assertEqual(accepted.description.status, "resolved")
+        self.assertEqual(accepted.description.origin, "acceptance")
+        self.assertIs(accepted.description.selection, suggestion)
+        self.assertEqual(accepted.description.candidates, review.candidates)
+
+        chosen = accepted.select_candidate(review.candidates[1]).description
+
+        self.assertEqual(chosen.value, "Y")
+        self.assertEqual(chosen.origin, "selection")
+        self.assertIs(chosen.selection, review.candidates[1])
+        self.assertEqual(chosen.suggestions, (suggestion,))
 
     def test_rules_do_not_synthesize_a_date_title_or_creator(self):
         result = selected(
@@ -694,6 +770,95 @@ class TestPmdSubjectGuard(unittest.TestCase):
                 self.assertEqual(codes(reviewed), ["pmd_subject_not_sole_candidate"])
                 self.assertEqual(reviewed.to_publication_metadata().title, "Table")
 
+    def test_same_subject_reselection_keeps_suggestions_and_review(self):
+        result = selected(TENSILE_TEST_2 + MATERIAL_2)
+        accepted = result.accept_suggestion(result.keywords.suggestions[0])
+        for subject in ("urn:publication", accepted.subject):
+            with self.subTest(subject=subject):
+                again = accepted.select_subject(subject)
+                self.assertEqual(offered(again), offered(result))
+                self.assertEqual(again.keywords.value, ("S355", "tensile test"))
+                self.assertEqual(again.keywords.origin, "acceptance")
+                self.assertEqual(again.diagnostics, accepted.diagnostics)
+        with self.assertRaises(ValidationError):
+            accepted.select_subject("urn:test")
+
+    def test_same_subject_reselection_keeps_a_refusal(self):
+        refused = harvest(
+            PREFIXES
+            + PUBLICATION
+            + TENSILE_TEST_2
+            + '<urn:table> a csvw:Table ; dct:title "Table" .',
+            subject="urn:table",
+        )
+        self.assert_refused(
+            refused.select_subject("urn:table"), "urn:table", TEST_EVIDENCE_2
+        )
+
+    def test_anonymous_sole_subject_gets_suggestions_that_can_be_accepted(self):
+        source = harvest(
+            PREFIXES
+            + '[] a owl:Ontology ; dct:title "Title" .'
+            + TENSILE_TEST_2
+            + MATERIAL_2
+        )
+        for route, result in (
+            ("automatic", source.select_subject_automatically()),
+            ("explicit", source.select_subject(source.subject_candidates[0].subject)),
+        ):
+            with self.subTest(route=route):
+                self.assertIsInstance(result.subject.term, BNode)
+                metadata = (
+                    result.accept_suggestion(result.description.suggestions[0])
+                    .accept_suggestion(result.keywords.suggestions[0])
+                    .with_overrides(creators=(Person(name="Jane Doe"),))
+                    .to_publication_metadata()
+                )
+                self.assertEqual(
+                    metadata.description, "Data from 1 tensile test. Material: S355."
+                )
+                self.assertEqual(metadata.keywords, ("S355", "tensile test"))
+
+    def test_anonymous_subject_beside_another_eligible_subject_is_refused(self):
+        source = harvest(
+            PREFIXES
+            + PUBLICATION
+            + '[] a owl:Ontology ; dct:title "Anonymous" .'
+            + TENSILE_TEST_2
+        )
+        record = next(
+            item.subject
+            for item in source.subject_candidates
+            if isinstance(item.subject.term, BNode)
+        )
+        self.assert_refused(
+            source.select_subject(record), str(record.term), TEST_EVIDENCE_2
+        )
+
+    def test_explicit_selection_after_a_failed_automatic_attempt_is_refused(self):
+        for generation, test, evidence, _ in GENERATIONS:
+            for failure, turtle, term in (
+                (
+                    "subject_ambiguous",
+                    PUBLICATION + '<urn:other> a dcat:Dataset ; dct:title "Other" .',
+                    "urn:publication",
+                ),
+                (
+                    "subject_candidate_missing",
+                    '<urn:resource> rdfs:label "Resource" .',
+                    "urn:resource",
+                ),
+            ):
+                with self.subTest(generation=generation, failure=failure):
+                    failed = harvest(
+                        PREFIXES + turtle + test
+                    ).select_subject_automatically()
+                    self.assertEqual(codes(failed), [failure])
+                    result = failed.select_subject(term)
+                    self.assert_refused(result, term, evidence)
+                    self.assertEqual(result.subject_origin, "selection")
+                    self.assertNotIn(failure, codes(result))
+
     def test_absent_subject_runs_no_rule_and_stays_selectable(self):
         for generation, test, _, _ in GENERATIONS:
             with self.subTest(generation=generation):
@@ -826,6 +991,32 @@ class TestPmdKeywordAcceptance(unittest.TestCase):
         )
         accepted = result.accept_suggestion(result.keywords.suggestions[0])
         self.assertEqual(accepted.to_publication_metadata().keywords, ("tensile test",))
+
+    def test_clearing_accepted_keywords_allows_re_acceptance(self):
+        result = selected(self.OBSERVED + TENSILE_TEST_2 + MATERIAL_2)
+        before = result.keywords
+        suggestion = before.suggestions[0]
+
+        cleared = result.accept_suggestion(suggestion).clear("keywords")
+
+        self.assertEqual(cleared.keywords.value, ())
+        self.assertEqual(cleared.keywords.status, "excluded")
+        self.assertEqual(cleared.keywords.origin, "exclusion")
+        self.assertIsNone(cleared.keywords.selection)
+        self.assertEqual(cleared.keywords.suggestions, (suggestion,))
+        self.assertEqual(cleared.keywords.candidates, before.candidates)
+        self.assertEqual(cleared.keywords.observations, before.observations)
+        reviewed = cleared.with_overrides(
+            description="Reviewed", creators=(Person(name="Jane Doe"),)
+        )
+        self.assertEqual(reviewed.to_publication_metadata().keywords, ())
+
+        again = cleared.accept_suggestion(suggestion).keywords
+
+        self.assertEqual(again.value, ("S355", "tensile test"))
+        self.assertEqual(again.status, "resolved")
+        self.assertEqual(again.origin, "acceptance")
+        self.assertIs(again.selection, suggestion)
 
     def test_reviewed_copy_accepts_and_a_later_override_replaces(self):
         result = selected(TENSILE_TEST_2)
