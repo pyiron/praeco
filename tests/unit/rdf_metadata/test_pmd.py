@@ -1,10 +1,12 @@
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 from rdflib import Graph
 
 from praeco import Person
-from praeco.rdf_metadata import Evidence
+from praeco.exceptions import ValidationError
+from praeco.rdf_metadata import Evidence, Suggestion
 from praeco.rdf_metadata import harvest_publication_metadata_from_rdf as harvest
 
 REVIEW_EXAMPLE = Path(__file__).parents[2] / "resources/rdf_metadata/review-example.ttl"
@@ -679,3 +681,104 @@ class TestPmdStableIdentity(unittest.TestCase):
             [item.rule for item in first.description.suggestions[0].evidence],
             [item.rule for item in second.description.suggestions[0].evidence],
         )
+
+
+class TestPmdKeywordAcceptance(unittest.TestCase):
+    OBSERVED = '<urn:publication> dcat:keyword "steel" .'
+
+    def test_accepting_replaces_active_keywords_and_keeps_observed_candidates(self):
+        result = selected(self.OBSERVED + TENSILE_TEST_2 + MATERIAL_2)
+        before = result.keywords
+        suggestion = before.suggestions[0]
+
+        accepted = result.accept_suggestion(suggestion).keywords
+
+        self.assertEqual(accepted.value, ("S355", "tensile test"))
+        self.assertEqual(accepted.status, "resolved")
+        self.assertEqual(accepted.origin, "acceptance")
+        self.assertIs(accepted.selection, suggestion)
+        self.assertEqual(accepted.candidates, before.candidates)
+        self.assertEqual(accepted.observations, before.observations)
+        self.assertEqual(accepted.suggestions, before.suggestions)
+
+    def test_acceptance_leaves_the_original_harvest_unchanged(self):
+        result = selected(self.OBSERVED + TENSILE_TEST_2)
+        before = result.keywords
+        result.accept_suggestion(before.suggestions[0])
+        self.assertEqual(result.keywords, before)
+        self.assertEqual(result.keywords.value, ("steel",))
+        self.assertEqual(result.keywords.origin, "automatic")
+
+    def test_accepting_resolves_keywords_that_block_conversion(self):
+        result = selected(
+            '<urn:publication> dcat:keyword "steel", <urn:concept> ;'
+            ' dct:description "Observed" ; dct:creator "Jane Doe" .' + TENSILE_TEST_2
+        )
+        self.assertEqual(result.keywords.status, "unresolved")
+        self.assertEqual(
+            [(item.code, item.field) for item in result.diagnostics if item.blocking],
+            [("unresolved_field", "keywords")],
+        )
+        accepted = result.accept_suggestion(result.keywords.suggestions[0])
+        self.assertEqual(accepted.to_publication_metadata().keywords, ("tensile test",))
+
+    def test_accepting_both_suggestions_publishes_them(self):
+        result = selected(TENSILE_TEST_2 + MATERIAL_2 + STANDARD_2)
+        accepted = result.accept_suggestion(
+            result.description.suggestions[0]
+        ).accept_suggestion(result.keywords.suggestions[0])
+        reviewed = accepted.with_overrides(creators=(Person(name="Jane Doe"),))
+        metadata = reviewed.to_publication_metadata()
+        self.assertEqual(
+            metadata.description,
+            "Data from 1 tensile test. Material: S355."
+            " Test standard: DIN EN ISO 6892-1.",
+        )
+        self.assertEqual(metadata.keywords, ("S355", "tensile test"))
+        self.assertEqual(reviewed.description.origin, "acceptance")
+        self.assertEqual(reviewed.keywords.origin, "acceptance")
+
+    def test_reviewed_copy_accepts_and_a_later_override_replaces(self):
+        result = selected(TENSILE_TEST_2)
+        suggestion = result.keywords.suggestions[0]
+        accepted = result.with_overrides(version="1").accept_suggestion(suggestion)
+        self.assertEqual(accepted.keywords.origin, "acceptance")
+        overridden = accepted.with_overrides(keywords=("reviewed",))
+        self.assertEqual(overridden.keywords.origin, "override")
+        self.assertIsNone(overridden.keywords.selection)
+        self.assertEqual(overridden.keywords.suggestions, (suggestion,))
+
+    def test_other_collection_fields_stay_rejected(self):
+        result = selected(TENSILE_TEST_2)
+        suggestion = result.keywords.suggestions[0]
+        for name in ("creators", "contributors", "related_identifiers"):
+            with self.subTest(name=name), self.assertRaises(ValidationError):
+                result.accept_suggestion(replace(suggestion, field=name))
+        self.assertEqual(result.keywords.status, "missing")
+
+    def test_records_not_offered_by_this_harvest_are_rejected(self):
+        result = selected(TENSILE_TEST_2)
+        suggestion = result.keywords.suggestions[0]
+        for item in (
+            selected(TENSILE_TEST_2).keywords.suggestions[0],
+            replace(suggestion),
+            Suggestion("keywords", ("invented",), ()),
+            ("tensile test",),
+        ):
+            with self.subTest(item=item), self.assertRaises(ValidationError):
+                result.accept_suggestion(item)
+        self.assertEqual(result.keywords.status, "missing")
+
+    def test_record_of_another_subject_is_rejected(self):
+        source = harvest(PREFIXES + TENSILE_TEST_2)
+        suggestion = source.select_subject("urn:publication").keywords.suggestions[0]
+        other = source.select_subject("urn:test")
+        with self.assertRaises(ValidationError):
+            other.accept_suggestion(suggestion)
+        self.assertEqual(other.keywords.status, "missing")
+
+    def test_unselected_harvest_rejects_a_record(self):
+        source = harvest(PREFIXES + TENSILE_TEST_2)
+        suggestion = source.select_subject_automatically().keywords.suggestions[0]
+        with self.assertRaises(ValidationError):
+            source.accept_suggestion(suggestion)

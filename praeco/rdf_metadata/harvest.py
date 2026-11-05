@@ -372,16 +372,21 @@ class RdfMetadataHarvest:
             )
         )
 
-    def accept_suggestion(self, suggestion: Suggestion[str] | Suggestion[date]) -> Self:
-        """Accept an inference locally; conversion publishes its reviewed value."""
+    def accept_suggestion(
+        self,
+        suggestion: Suggestion[str] | Suggestion[date] | Suggestion[tuple[str, ...]],
+    ) -> Self:
+        """Accept an inference locally; conversion publishes its reviewed value.
+
+        A keyword suggestion replaces the active keywords as a whole.
+        """
         subject = self._require_subject()
         if (
             not isinstance(suggestion, Suggestion)
-            or suggestion.field
-            in ("creators", "contributors", "keywords", "related_identifiers")
+            or suggestion.field in ("creators", "contributors", "related_identifiers")
             or suggestion.field not in FIELD_NAMES
         ):
-            raise ValidationError("accept an available scalar suggestion")
+            raise ValidationError("accept an available scalar or keyword suggestion")
         review = self._raw_field(suggestion.field)
         if (
             suggestion._context is not self._source.token
