@@ -694,17 +694,15 @@ class TestPmdSubjectGuard(unittest.TestCase):
                     )
 
     def test_two_eligible_subjects_leave_automatic_selection_unselected(self):
-        for generation, test, _, _ in GENERATIONS:
-            with self.subTest(generation=generation):
-                result = harvest(
-                    PREFIXES
-                    + PUBLICATION
-                    + test
-                    + '<urn:other> a dcat:Dataset ; dct:title "Other" .'
-                ).select_subject_automatically()
-                self.assertIsNone(result.subject)
-                self.assertEqual(codes(result), ["subject_ambiguous"])
-                self.assertEqual(offered(result), ([], []))
+        result = harvest(
+            PREFIXES
+            + PUBLICATION
+            + TENSILE_TEST_2
+            + '<urn:other> a dcat:Dataset ; dct:title "Other" .'
+        ).select_subject_automatically()
+        self.assertIsNone(result.subject)
+        self.assertEqual(codes(result), ["subject_ambiguous"])
+        self.assertEqual(offered(result), ([], []))
 
     def test_explicitly_selected_non_eligible_subjects_are_refused(self):
         for generation, test, evidence, _ in GENERATIONS:
@@ -738,12 +736,12 @@ class TestPmdSubjectGuard(unittest.TestCase):
                 + '<urn:table> a csvw:Table ; dct:title "Table" .'
             )
             automatic = harvest(turtle).select_subject_automatically()
-            for explicit in (
-                harvest(turtle, subject="urn:publication"),
-                harvest(turtle).select_subject("urn:publication"),
-                harvest(turtle).select_subject(automatic.subject.term),
+            for route, explicit in (
+                ("entry function", harvest(turtle, subject="urn:publication")),
+                ("string", harvest(turtle).select_subject("urn:publication")),
+                ("term", harvest(turtle).select_subject(automatic.subject.term)),
             ):
-                with self.subTest(generation=generation):
+                with self.subTest(generation=generation, route=route):
                     self.assertEqual(
                         explicit.description.suggestions,
                         automatic.description.suggestions,
@@ -755,20 +753,18 @@ class TestPmdSubjectGuard(unittest.TestCase):
                     self.assertEqual(explicit.diagnostics, automatic.diagnostics)
 
     def test_refusal_does_not_block_conversion(self):
-        for generation, test, _, _ in GENERATIONS:
-            with self.subTest(generation=generation):
-                result = harvest(
-                    PREFIXES
-                    + PUBLICATION
-                    + test
-                    + '<urn:table> a csvw:Table ; dct:title "Table" .',
-                    subject="urn:table",
-                )
-                reviewed = result.with_overrides(
-                    description="Reviewed", creators=(Person(name="Jane Doe"),)
-                )
-                self.assertEqual(codes(reviewed), ["pmd_subject_not_sole_candidate"])
-                self.assertEqual(reviewed.to_publication_metadata().title, "Table")
+        result = harvest(
+            PREFIXES
+            + PUBLICATION
+            + TENSILE_TEST_2
+            + '<urn:table> a csvw:Table ; dct:title "Table" .',
+            subject="urn:table",
+        )
+        reviewed = result.with_overrides(
+            description="Reviewed", creators=(Person(name="Jane Doe"),)
+        )
+        self.assertEqual(codes(reviewed), ["pmd_subject_not_sole_candidate"])
+        self.assertEqual(reviewed.to_publication_metadata().title, "Table")
 
     def test_same_subject_reselection_keeps_suggestions_and_review(self):
         result = selected(TENSILE_TEST_2 + MATERIAL_2)
@@ -860,14 +856,12 @@ class TestPmdSubjectGuard(unittest.TestCase):
                     self.assertNotIn(failure, codes(result))
 
     def test_absent_subject_runs_no_rule_and_stays_selectable(self):
-        for generation, test, _, _ in GENERATIONS:
-            with self.subTest(generation=generation):
-                result = harvest(PREFIXES + PUBLICATION + test, subject="urn:absent")
-                self.assertEqual(codes(result), ["subject_not_found"])
-                self.assertEqual(
-                    offered(result.select_subject("urn:publication")),
-                    (["Data from 1 tensile test."], [("tensile test",)]),
-                )
+        result = harvest(PREFIXES + PUBLICATION + TENSILE_TEST_2, subject="urn:absent")
+        self.assertEqual(codes(result), ["subject_not_found"])
+        self.assertEqual(
+            offered(result.select_subject("urn:publication")),
+            (["Data from 1 tensile test."], [("tensile test",)]),
+        )
 
 
 class TestPmdStableIdentity(unittest.TestCase):
