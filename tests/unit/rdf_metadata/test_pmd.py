@@ -670,9 +670,12 @@ class TestPmdNoSignature(unittest.TestCase):
 class TestPmdSubjectGuard(unittest.TestCase):
     def assert_refused(self, result, term: str, evidence: Evidence) -> None:
         self.assertEqual(offered(result), ([], []))
-        refusal = result.diagnostics[-1]
-        self.assertEqual(refusal.code, "pmd_subject_not_sole_candidate")
-        self.assertEqual(codes(result).count(refusal.code), 1)
+        self.assertEqual(codes(result).count("pmd_subject_not_sole_candidate"), 1)
+        refusal = next(
+            item
+            for item in result.diagnostics
+            if item.code == "pmd_subject_not_sole_candidate"
+        )
         self.assertIsNone(refusal.field)
         self.assertEqual(str(refusal.subject), term)
         self.assertFalse(refusal.blocking)
@@ -1362,8 +1365,12 @@ class TestPmdGenerations(unittest.TestCase):
             TENSILE_TEST_2 + MATERIAL_2 + STANDARD_2 + TENSILE_TEST_3 + MATERIAL_3
         )
         self.assertEqual(offered(result), ([], []))
-        conflict = result.diagnostics[-1]
-        self.assertEqual(conflict.code, "pmd_generation_conflict")
+        self.assertEqual(codes(result).count("pmd_generation_conflict"), 1)
+        conflict = next(
+            item
+            for item in result.diagnostics
+            if item.code == "pmd_generation_conflict"
+        )
         self.assertIsNone(conflict.field)
         self.assertEqual(str(conflict.subject), "urn:publication")
         self.assertFalse(conflict.blocking)
