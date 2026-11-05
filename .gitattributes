@@ -1,1 +1,2 @@
 courier/_version.py export-subst
+tests/resources/rdf_metadata/corpus/*.ttl -text
