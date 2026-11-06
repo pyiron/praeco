@@ -32,7 +32,19 @@ New user code should usually start with a service client. Use `HttpClient` direc
 
 `praeco` supports Python 3.11 to 3.13. Development in this repository currently targets Python 3.12.
 
-For local use or development:
+Install a release from PyPI:
+
+```bash
+pip install praeco
+```
+
+or from conda-forge:
+
+```bash
+conda install -c conda-forge praeco
+```
+
+For development, use an editable install from a clone:
 
 ```bash
 git clone https://github.com/pyiron/praeco.git
@@ -43,8 +55,6 @@ pip install -e .
 ```
 
 If you want the documentation environment as well, see `docs/environment.yml`.
-
-PyPI and conda-forge releases are planned, but the current hands-on installation path is an editable install from the repository.
 
 ## Service Clients
 
