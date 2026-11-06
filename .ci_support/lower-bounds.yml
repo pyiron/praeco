@@ -6,6 +6,7 @@ dependencies:
 - python =3.11
 - pandas =3.0.0
 - pydantic =2.0.0
+- rdflib =7.3.0
 - requests =2.32.5
 - sparqlwrapper =2.0.0
   
