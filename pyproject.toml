@@ -38,7 +38,7 @@ file = "LICENSE"
 
 [project.urls]
 Homepage = "https://pyiron.org/"
-Documentation = "https://praeco.readthedocs.io"
+Documentation = "https://github.com/pyiron/praeco#readme"
 Repository = "https://github.com/pyiron/praeco"
 
 [tool.hatch.build]
