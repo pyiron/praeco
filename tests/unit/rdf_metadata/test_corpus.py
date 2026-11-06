@@ -14,7 +14,7 @@ REVIEWED_CREATORS = (Person(name="Jane Doe"),)
 
 
 class TestPmdReferenceCorpus(unittest.TestCase):
-    """Current harvesting of the PMD reference files, before any PMD rules."""
+    """Harvesting of the PMD reference files, with the exact PMD rules applied."""
 
     def test_pmdco2_example_keeps_its_creator_identities_unresolved(self):
         subject = URIRef("https://w3id.org/pmd/ao/tte/")
@@ -99,6 +99,76 @@ class TestPmdReferenceCorpus(unittest.TestCase):
         self.assertEqual(reviewed.diagnostics, ())
         self.assertEqual(reviewed.creators.observations, creators.observations)
 
+    def test_pmdco2_example_suggests_its_description_and_keywords(self):
+        harvest = harvest_publication_metadata_from_rdf(
+            CORPUS / "pmdco2_tto_example.ttl"
+        ).select_subject_automatically()
+
+        description = harvest.description
+        self.assertEqual(
+            [suggestion.value for suggestion in description.suggestions],
+            [
+                "Data from 10 tensile tests. Material: S355. Test standard: DIN EN ISO 6892-1."
+            ],
+        )
+        self.assertEqual(
+            [
+                (item.rule, len(item.triples))
+                for item in description.suggestions[0].evidence
+            ],
+            [
+                ("pmdco2_tensile_test", 20),
+                ("pmdco2_material", 20),
+                ("pmdco2_test_standard", 12),
+            ],
+        )
+        self.assertIn(
+            (
+                "<https://w3id.org/pmd/ao/tte/_standard>",
+                "<https://w3id.org/pmd/co/value>",
+                '"DIN EN ISO 6892-1"',
+            ),
+            description.suggestions[0].evidence[2].triples,
+        )
+        self.assertEqual((description.value, description.status), (None, "missing"))
+
+        keywords = harvest.keywords
+        self.assertEqual(
+            [suggestion.value for suggestion in keywords.suggestions],
+            [("S355", "tensile test")],
+        )
+        self.assertEqual(
+            [
+                (item.rule, len(item.triples))
+                for item in keywords.suggestions[0].evidence
+            ],
+            [("pmdco2_tensile_test", 20), ("pmdco2_material", 20)],
+        )
+        self.assertEqual((keywords.value, keywords.status), (None, "missing"))
+
+    def test_pmdco2_example_converts_its_accepted_suggestions(self):
+        harvest = harvest_publication_metadata_from_rdf(
+            CORPUS / "pmdco2_tto_example.ttl"
+        ).select_subject_automatically()
+
+        reviewed = (
+            harvest.accept_suggestion(harvest.description.suggestions[0])
+            .accept_suggestion(harvest.keywords.suggestions[0])
+            .with_overrides(creators=REVIEWED_CREATORS)
+        )
+
+        metadata = reviewed.to_publication_metadata()
+        self.assertEqual(
+            metadata.description,
+            "Data from 10 tensile tests. Material: S355. Test standard: DIN EN ISO 6892-1.",
+        )
+        self.assertEqual(metadata.keywords, ("S355", "tensile test"))
+        self.assertEqual(metadata.creators, REVIEWED_CREATORS)
+        self.assertEqual(reviewed.description.origin, "acceptance")
+        self.assertEqual(reviewed.keywords.origin, "acceptance")
+        self.assertEqual(reviewed.diagnostics, ())
+        self.assertEqual(reviewed.creators.observations, harvest.creators.observations)
+
     def test_pmdco3_example_offers_its_creation_date_only_as_a_suggestion(self):
         subject = URIRef("https://w3id.org/pmd/demodata/tensiletest_S355/")
         harvest = harvest_publication_metadata_from_rdf(
@@ -160,3 +230,91 @@ class TestPmdReferenceCorpus(unittest.TestCase):
         self.assertIsNone(metadata.publication_date)
         self.assertEqual(reviewed.diagnostics, ())
         self.assertEqual(len(reviewed.publication_date.suggestions), 1)
+
+    def test_pmdco3_example_suggests_its_description_and_keywords(self):
+        harvest = harvest_publication_metadata_from_rdf(
+            CORPUS / "S355_data_tto_pmdco3.ttl"
+        ).select_subject_automatically()
+
+        description = harvest.description
+        self.assertEqual(
+            [suggestion.value for suggestion in description.suggestions],
+            [
+                "Data from 10 tensile tests. Material: S355. Test standard: DIN EN ISO 6892-1."
+            ],
+        )
+        self.assertEqual(
+            [
+                (item.rule, len(item.triples))
+                for item in description.suggestions[0].evidence
+            ],
+            [
+                ("pmdco3_tensile_test", 20),
+                ("pmdco3_material", 40),
+                ("pmdco3_test_standard", 50),
+            ],
+        )
+        self.assertIn(
+            (
+                "<https://w3id.org/pmd/demodata/tensiletest_S355/testpiece/Zd2_material_material_identifier_value>",
+                "<https://w3id.org/pmd/co/PMD_0000006>",
+                '"S355"^^<http://www.w3.org/2001/XMLSchema#string>',
+            ),
+            description.suggestions[0].evidence[1].triples,
+        )
+        self.assertEqual((description.value, description.status), (None, "missing"))
+
+        keywords = harvest.keywords
+        self.assertEqual(
+            [suggestion.value for suggestion in keywords.suggestions],
+            [("S355", "tensile test")],
+        )
+        self.assertEqual(
+            [
+                (item.rule, len(item.triples))
+                for item in keywords.suggestions[0].evidence
+            ],
+            [("pmdco3_tensile_test", 20), ("pmdco3_material", 40)],
+        )
+        self.assertEqual((keywords.value, keywords.status), (None, "missing"))
+
+    def test_pmdco3_example_converts_its_accepted_suggestions(self):
+        harvest = harvest_publication_metadata_from_rdf(
+            CORPUS / "S355_data_tto_pmdco3.ttl"
+        ).select_subject_automatically()
+
+        reviewed = (
+            harvest.accept_suggestion(harvest.description.suggestions[0])
+            .accept_suggestion(harvest.keywords.suggestions[0])
+            .with_overrides(creators=REVIEWED_CREATORS)
+        )
+
+        metadata = reviewed.to_publication_metadata()
+        self.assertEqual(
+            metadata.description,
+            "Data from 10 tensile tests. Material: S355. Test standard: DIN EN ISO 6892-1.",
+        )
+        self.assertEqual(metadata.keywords, ("S355", "tensile test"))
+        self.assertEqual(metadata.creators, REVIEWED_CREATORS)
+        self.assertIsNone(metadata.publication_date)
+        self.assertEqual(reviewed.description.origin, "acceptance")
+        self.assertEqual(reviewed.keywords.origin, "acceptance")
+        self.assertEqual(reviewed.diagnostics, ())
+        self.assertEqual(len(reviewed.publication_date.suggestions), 1)
+
+    def test_both_generations_suggest_equivalent_facts(self):
+        pmdco2, pmdco3 = (
+            harvest_publication_metadata_from_rdf(
+                CORPUS / name
+            ).select_subject_automatically()
+            for name in ("pmdco2_tto_example.ttl", "S355_data_tto_pmdco3.ttl")
+        )
+
+        self.assertEqual(
+            pmdco2.description.suggestions[0].value,
+            pmdco3.description.suggestions[0].value,
+        )
+        self.assertEqual(
+            pmdco2.keywords.suggestions[0].value,
+            pmdco3.keywords.suggestions[0].value,
+        )
