@@ -659,9 +659,10 @@ The repository is organized by responsibility:
 - `praeco/services/ontodocker/` contains Ontodocker routes, resources, models, and compatibility helpers.
 - `praeco/services/dataportal/` contains Dataportal datasets, assets, metadata, DCAT RDF, SPARQL, and CKAN-backed models.
 - `praeco/services/zenodo/` contains Zenodo routes, resources, metadata authoring objects, response models, and Zenodo-specific errors.
+- `praeco/rdf_metadata/` contains local RDF publication-metadata harvesting: source loading, direct extraction, subject selection, PMD tensile-test suggestions, and the immutable review records.
 - `tests/unit/` contains focused behavior tests using fake sessions and responses where practical.
 - `tests/integration/` contains integration-oriented checks, including the README doctest loader.
-- `notebooks/` contains runnable demos for the public clients.
+- `notebooks/` contains runnable demos for the public clients and RDF metadata harvesting.
 - `.notes/` may contain local planning or investigation notes. Treat these as internal working material, not automatically user-facing documentation.
 
 Keep generic behavior generic. URL normalization, authentication header handling, request execution, and general response helpers belong in transport code. Service routes, service models, compatibility behavior, and service-specific exceptions belong under the corresponding service package.
