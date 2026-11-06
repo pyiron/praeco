@@ -523,6 +523,39 @@ Zenodo API failures raise `ZenodoApiError` or a more specific subclass such as `
 
 See the [ZenodoClient notebook](https://github.com/pyiron/praeco/blob/main/notebooks/ZenodoClient.ipynb) for a sandbox demo and more detailed usage.
 
+## RDF Metadata Harvesting
+
+`harvest_publication_metadata_from_rdf` reads publication metadata from local RDF data: an `rdflib.Graph`, Turtle as `str` or `bytes`, or a Turtle file as `pathlib.Path`. It doesn't fetch remote resources. The result is a review: every value keeps the RDF statements behind it, and missing or conflicting information stays visible until you resolve it.
+
+Select a publication subject, inspect the review, accept the suggestions you have checked, and supply what the data doesn't contain. Run this example from the repository root:
+
+```python
+from pathlib import Path
+
+from praeco import Person, harvest_publication_metadata_from_rdf
+from praeco.services.dataportal import DataportalMetadata
+
+harvest = harvest_publication_metadata_from_rdf(
+    Path("tests/resources/rdf_metadata/corpus/S355_data_tto_pmdco3.ttl")
+).select_subject_automatically()
+
+suggestion = harvest.description.suggestions[0]
+print(suggestion.value)  # Data from 10 tensile tests. Material: S355. ...
+
+reviewed = harvest.accept_suggestion(suggestion).with_overrides(
+    creators=(Person(name="Jane Doe"),)
+)
+
+publication = reviewed.to_publication_metadata()
+metadata = DataportalMetadata(metadata=publication)
+```
+
+`select_subject_automatically()` selects a subject only when exactly one resource qualifies; otherwise, choose one with `select_subject`. A suggestion changes nothing until you accept it. A file that matches praeco's PMDco 2 or PMDco 3 tensile-test rules and has a single publication candidate also gets description and keyword suggestions, as in this example.
+
+`to_publication_metadata()` raises `praeco.rdf_metadata.IncompleteHarvestError` while required information is missing or observed values conflict. It returns an ordinary `PublicationMetadata`, so the service adapters apply as usual, with their own validation and defaults. Nothing is published automatically.
+
+See the [RdfMetadataHarvesting notebook](https://github.com/pyiron/praeco/blob/main/notebooks/RdfMetadataHarvesting.ipynb) for a complete review, including conflicting values and the Dataportal and Zenodo payloads.
+
 ## Protocol Clients
 
 Protocol clients provide lower-level infrastructure for service clients and advanced use.
