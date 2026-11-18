@@ -334,6 +334,31 @@ class TestDatasetsResource(unittest.TestCase):
         self.assertEqual(caught.exception.status_code, 404)
         self.assertTrue(s.response.closed)
 
+    def test_download_turtle_closes_response_when_reading_error_body_fails(self):
+        class _BrokenErrorBody(_FakeResponse):
+            @property
+            def text(self):
+                raise requests.ConnectionError("connection dropped")
+
+            @text.setter
+            def text(self, value):
+                pass
+
+        s = _FakeSession()
+        s.response = _BrokenErrorBody(
+            status_code=502,
+            request=_FakeRequest("GET"),
+            raise_for_status_exc=requests.HTTPError("502 Server Error"),
+        )
+        c = OntodockerClient("https://example.org", session=s)
+
+        with TemporaryDirectory() as tmp:
+            with self.assertRaises(requests.ConnectionError):
+                _ = c.datasets.download_turtle("ds", Path(tmp) / "out.ttl")
+
+            self.assertEqual(list(Path(tmp).iterdir()), [])
+        self.assertTrue(s.response.closed)
+
     def test_upload_turtlefile_validates_inputs(self):
         s = _FakeSession()
         c = OntodockerClient("https://example.org", session=s)

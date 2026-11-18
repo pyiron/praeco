@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 import rdflib
 
-from praeco.exceptions import HttpError, ValidationError
+from praeco.exceptions import ValidationError
 from praeco.transport.download import blocking_ancestor, write_response_to_path
 from praeco.transport.request import raise_for_status
 from praeco.transport.url import join_url
@@ -146,7 +146,9 @@ class DatasetsResource:
         resp = self.client.request("GET", url, stream=True)
         try:
             raise_for_status(resp)
-        except HttpError:
+        except BaseException:
+            # Also if reading the error body fails, for example on a dropped
+            # connection; write_response_to_path closes it otherwise.
             resp.close()
             raise
         return write_response_to_path(resp, path, overwrite=overwrite)
