@@ -858,6 +858,18 @@ class TestRecordFilesLocalPathChecks(_TempDirTestCase):
             )
         self.assertEqual(blocker.read_bytes(), b"not a directory")
 
+    def test_directory_below_a_file_blocks_downloads(self):
+        blocker = self.root / "blocker"
+        _ = blocker.write_bytes(b"not a directory")
+        for overwrite in (False, True):
+            self.assert_rejected_before_content(
+                ["a.txt"],
+                FileExistsError,
+                directory=blocker / "downloads",
+                overwrite=overwrite,
+            )
+        self.assertEqual(blocker.read_bytes(), b"not a directory")
+
     def test_existing_directory_at_target_blocks_downloads(self):
         (self.root / "a.txt").mkdir()
         for overwrite in (False, True):

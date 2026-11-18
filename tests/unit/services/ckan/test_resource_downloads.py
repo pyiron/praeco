@@ -349,15 +349,19 @@ class TestDownloadRequests(_TempDirTestCase):
                 resource("link-1", url="https://other.test/a.ttl", url_type="")
             ),
         }
+        directories = {"file": file_path, "below a file": file_path / "downloads"}
         for label, payload in packages.items():
-            for overwrite in (False, True):
-                with self.subTest(package=label, overwrite=overwrite):
-                    c, session = make_client([action(payload)])
+            for kind, directory in directories.items():
+                for overwrite in (False, True):
+                    with self.subTest(
+                        package=label, directory=kind, overwrite=overwrite
+                    ):
+                        c, session = make_client([action(payload)])
 
-                    with self.assertRaises(FileExistsError):
-                        c.resources.download_all(
-                            "pkg-1", directory=file_path, overwrite=overwrite
-                        )
+                        with self.assertRaises(FileExistsError):
+                            c.resources.download_all(
+                                "pkg-1", directory=directory, overwrite=overwrite
+                            )
 
                     self.assertEqual(len(session.calls), 1)
                     self.assertEqual(tree(self.root), ["file.txt"])
@@ -947,6 +951,30 @@ class TestLocalChecks(_TempDirTestCase):
                 with self.assertRaises(FileExistsError):
                     c.resources.download_all(
                         "pkg-1", directory=file_path, overwrite=overwrite
+                    )
+
+                self.assertEqual(len(session.calls), 1)
+                self.assertEqual(file_path.read_text(), "keep")
+
+    def test_directory_below_a_file_raises_before_content(self):
+        file_path = self.root / "file.txt"
+        file_path.write_text("keep")
+        directory = file_path / "downloads"
+        for overwrite in (False, True):
+            with self.subTest(overwrite=overwrite):
+                c, session = make_client([action(resource())])
+
+                with self.assertRaises(FileExistsError):
+                    c.resources.download(
+                        "res-1", directory=directory, overwrite=overwrite
+                    )
+
+                self.assertEqual(len(session.calls), 1)
+                c, session = make_client([action(self.two_uploads())])
+
+                with self.assertRaises(FileExistsError):
+                    c.resources.download_all(
+                        "pkg-1", directory=directory, overwrite=overwrite
                     )
 
                 self.assertEqual(len(session.calls), 1)

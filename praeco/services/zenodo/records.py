@@ -13,7 +13,7 @@ from praeco.exceptions import ValidationError
 from praeco.services.zenodo._response import raise_zenodo_error, read_zenodo_json
 from praeco.services.zenodo._urls import record_draft_files_url, record_files_url
 from praeco.services.zenodo.models import DepositionInfo
-from praeco.transport.download import write_response_to_path
+from praeco.transport.download import blocking_ancestor, write_response_to_path
 
 if TYPE_CHECKING:
     from praeco.services.zenodo.client import ZenodoClient
@@ -301,13 +301,16 @@ def _colliding_keys(
 def _check_no_local_conflicts(directory: str | Path, targets: Sequence[Path]) -> None:
     """Reject local paths that would block writing a target.
 
-    A target must not be an existing directory, and `directory` and every
-    path between it and the target must be a directory if it exists.
+    A target must not be an existing directory, and every path between
+    `directory` and the target must be a directory if it exists. `directory`
+    itself, or its nearest existing ancestor if it does not exist yet, must
+    be a directory too.
     """
     base = Path(directory)
     blocking: list[Path] = []
-    if os.path.lexists(base) and not base.is_dir():
-        blocking.append(base)
+    blocked_base = blocking_ancestor(base)
+    if blocked_base is not None:
+        blocking.append(blocked_base)
     for target in targets:
         if target.is_dir():
             blocking.append(target)

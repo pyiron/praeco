@@ -14,6 +14,7 @@ import requests
 from praeco.exceptions import ValidationError
 from praeco.services.ckan.models import CkanResourceInfo
 from praeco.services.ckan.response import raise_ckan_error
+from praeco.transport.download import blocking_ancestor
 
 if TYPE_CHECKING:
     from praeco.services.ckan.client import CkanClient
@@ -203,13 +204,15 @@ def check_local_conflicts(
     """Reject local paths that would prevent writing the targets.
 
     `FileExistsError` is raised first for local paths that block a target
-    regardless of `overwrite` (`directory` is not a directory, or a target is
-    a directory), then for existing targets when `overwrite` is False.
+    regardless of `overwrite` (`directory`, or its nearest existing ancestor
+    if it does not exist yet, is not a directory, or a target is a
+    directory), then for existing targets when `overwrite` is False.
     """
     base = Path(directory)
     blocking: list[Path] = []
-    if os.path.lexists(base) and not base.is_dir():
-        blocking.append(base)
+    blocked_base = blocking_ancestor(base)
+    if blocked_base is not None:
+        blocking.append(blocked_base)
     blocking.extend(target for target in targets if target.is_dir())
     if blocking:
         raise FileExistsError(
