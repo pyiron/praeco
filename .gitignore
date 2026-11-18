@@ -10,14 +10,5 @@ apidoc/
 .ipynb_checkpoints/
 test_times.dat
 core.*
-*.~undo-tree~
-.#*
-\#*#
-.dir-locals.el
 _version.py
 jupyterlab.log
-.ai.code.files/
-AGENTS.md
-.notes/
-.codex
-.codex/
