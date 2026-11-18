@@ -6,8 +6,9 @@ from unittest import mock
 
 import pandas as pd
 import rdflib
+import requests
 
-from praeco.exceptions import ValidationError
+from praeco.exceptions import HttpError, ValidationError
 from praeco.services.ontodocker import OntodockerClient
 from praeco.services.ontodocker.models import EndpointInfo
 
@@ -28,6 +29,7 @@ class _FakeResponse:
         raise_for_status_exc: Exception | None = None,
         json_value=None,
         json_exc: Exception | None = None,
+        content: bytes | None = None,
     ):
         self.url = url
         self.status_code = status_code
@@ -36,6 +38,15 @@ class _FakeResponse:
         self._raise_for_status_exc = raise_for_status_exc
         self._json_value = json_value
         self._json_exc = json_exc
+        self.content = text.encode("utf-8") if content is None else content
+        self.closed = False
+
+    def iter_content(self, chunk_size: int = 1):
+        for start in range(0, len(self.content), chunk_size):
+            yield self.content[start : start + chunk_size]
+
+    def close(self):
+        self.closed = True
 
     def raise_for_status(self):
         if self._raise_for_status_exc is not None:
@@ -206,6 +217,122 @@ class TestDatasetsResource(unittest.TestCase):
 
             self.assertEqual(out, path)
             self.assertEqual(path.read_text(encoding="utf-8"), "@prefix : <x> .")
+            self.assertEqual(sorted(p.name for p in Path(tmp).iterdir()), ["out.ttl"])
+        self.assertEqual(s.calls[0]["method"], "GET")
+        self.assertEqual(s.calls[0]["url"], "https://example.org/api/v1/jena/ds")
+        self.assertTrue(s.calls[0]["stream"], msg="the body must be streamed")
+        self.assertTrue(s.response.closed)
+
+    def test_download_turtle_accepts_str_filename(self):
+        s = _FakeSession()
+        s.response = _FakeResponse(text="@prefix : <x> .", request=_FakeRequest("GET"))
+        c = OntodockerClient("https://example.org", session=s)
+
+        with TemporaryDirectory() as tmp:
+            out = c.datasets.download_turtle("ds", str(Path(tmp) / "out.ttl"))
+
+            self.assertEqual(out, Path(tmp) / "out.ttl")
+            self.assertTrue(out.is_file())
+
+    def test_download_turtle_writes_response_bytes_unchanged(self):
+        # Not valid UTF-8: decoding and re-encoding the text would change it.
+        body = b"@prefix : <x> .\r\n# caf\xe9\r\n"
+        s = _FakeSession()
+        s.response = _FakeResponse(content=body, request=_FakeRequest("GET"))
+        c = OntodockerClient("https://example.org", session=s)
+
+        with TemporaryDirectory() as tmp:
+            path = c.datasets.download_turtle("ds", Path(tmp) / "out.ttl")
+
+            self.assertEqual(path.read_bytes(), body)
+
+    def test_download_turtle_creates_missing_parent_directories(self):
+        s = _FakeSession()
+        s.response = _FakeResponse(text="@prefix : <x> .", request=_FakeRequest("GET"))
+        c = OntodockerClient("https://example.org", session=s)
+
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "a" / "b" / "out.ttl"
+            out = c.datasets.download_turtle("ds", path)
+
+            self.assertEqual(out, path)
+            self.assertEqual(path.read_text(encoding="utf-8"), "@prefix : <x> .")
+
+    def test_download_turtle_existing_file_raises_before_the_request(self):
+        s = _FakeSession()
+        c = OntodockerClient("https://example.org", session=s)
+
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "out.ttl"
+            path.write_text("old", encoding="utf-8")
+
+            with self.assertRaises(FileExistsError):
+                _ = c.datasets.download_turtle("ds", path)
+
+            self.assertEqual(path.read_text(encoding="utf-8"), "old")
+        self.assertEqual(s.calls, [])
+
+    def test_download_turtle_overwrite_replaces_existing_file(self):
+        s = _FakeSession()
+        s.response = _FakeResponse(text="new", request=_FakeRequest("GET"))
+        c = OntodockerClient("https://example.org", session=s)
+
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "out.ttl"
+            path.write_text("old", encoding="utf-8")
+
+            out = c.datasets.download_turtle("ds", path, overwrite=True)
+
+            self.assertEqual(out, path)
+            self.assertEqual(path.read_text(encoding="utf-8"), "new")
+
+    def test_download_turtle_blocked_target_raises_before_the_request(self):
+        s = _FakeSession()
+        c = OntodockerClient("https://example.org", session=s)
+
+        with TemporaryDirectory() as tmp:
+            directory = Path(tmp) / "dir.ttl"
+            directory.mkdir()
+            file = Path(tmp) / "file"
+            file.write_text("keep", encoding="utf-8")
+            targets = {
+                "target is a directory": directory,
+                "parent is a file": file / "out.ttl",
+                "ancestor is a file": file / "sub" / "out.ttl",
+            }
+            for label, target in targets.items():
+                for overwrite in (False, True):
+                    with (
+                        self.subTest(case=label, overwrite=overwrite),
+                        self.assertRaisesRegex(
+                            FileExistsError, "local path blocks target file"
+                        ),
+                    ):
+                        _ = c.datasets.download_turtle(
+                            "ds", target, overwrite=overwrite
+                        )
+
+            self.assertTrue(directory.is_dir())
+            self.assertEqual(file.read_text(encoding="utf-8"), "keep")
+        self.assertEqual(s.calls, [])
+
+    def test_download_turtle_http_error_leaves_no_file_and_closes_response(self):
+        s = _FakeSession()
+        s.response = _FakeResponse(
+            status_code=404,
+            text="Not Found",
+            request=_FakeRequest("GET"),
+            raise_for_status_exc=requests.HTTPError("404 Client Error"),
+        )
+        c = OntodockerClient("https://example.org", session=s)
+
+        with TemporaryDirectory() as tmp:
+            with self.assertRaises(HttpError) as caught:
+                _ = c.datasets.download_turtle("ds", Path(tmp) / "out.ttl")
+
+            self.assertEqual(list(Path(tmp).iterdir()), [])
+        self.assertEqual(caught.exception.status_code, 404)
+        self.assertTrue(s.response.closed)
 
     def test_upload_turtlefile_validates_inputs(self):
         s = _FakeSession()
