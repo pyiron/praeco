@@ -14,6 +14,7 @@ from praeco.services.zenodo.exceptions import (
     ZenodoValidationError,
 )
 from praeco.services.zenodo.models import ZenodoFieldError
+from praeco.transport.request import shorten_error_text
 
 
 def read_zenodo_json(resp: requests.Response) -> Any:
@@ -79,7 +80,7 @@ def _error_message(payload: Any | None, resp: requests.Response) -> str:
 
     text = getattr(resp, "text", None)
     if isinstance(text, str) and text.strip():
-        return text.strip()
+        return shorten_error_text(text)
     return "Zenodo API request failed."
 
 

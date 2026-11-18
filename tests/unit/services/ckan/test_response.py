@@ -4,6 +4,7 @@ from typing import Any, cast
 
 from praeco.services.ckan.exceptions import CkanApiError
 from praeco.services.ckan.response import read_ckan_result
+from praeco.transport.request import shorten_error_text
 
 from ._helpers import FakeRequest, FakeResponse
 
@@ -122,6 +123,26 @@ class TestCkanResponse(unittest.TestCase):
         self.assertEqual(ctx.exception.message, "Server unavailable")
         self.assertEqual(ctx.exception.status_code, 500)
         self.assertIsNone(ctx.exception.payload)
+
+    def test_long_non_json_error_body_is_shortened_in_the_message(self):
+        body = "<html>\n<body>\n" + "Bad gateway. " * 100 + "\n</body>\n</html>"
+        response = FakeResponse(
+            status_code=502,
+            text=body,
+            json_exc=ValueError("invalid json"),
+            request=FakeRequest("GET"),
+        )
+
+        with self.assertRaises(CkanApiError) as ctx:
+            read_ckan_result(cast(Any, response))
+
+        self.assertEqual(ctx.exception.message, shorten_error_text(body))
+        self.assertLess(len(ctx.exception.message), len(body))
+        self.assertEqual(
+            ctx.exception.response_text,
+            body,
+            msg="the full body must stay available",
+        )
 
     def test_http_error_without_payload_or_text_uses_default_message(self):
         response = FakeResponse(
