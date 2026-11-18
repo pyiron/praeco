@@ -14,6 +14,7 @@ import requests
 from praeco.exceptions import ValidationError
 from praeco.services.ckan.models import CkanResourceInfo
 from praeco.services.ckan.response import raise_ckan_error
+from praeco.transport.download import blocking_ancestor
 
 if TYPE_CHECKING:
     from praeco.services.ckan.client import CkanClient
@@ -151,14 +152,20 @@ def default_file_name(resource: CkanResourceInfo, url: str) -> str:
 def check_unique_names(
     resources: Sequence[CkanResourceInfo], names: Sequence[str]
 ) -> None:
-    """Raise `ValidationError` if several resources map to the same name."""
+    """Raise `ValidationError` if several resources map to the same name.
+
+    Names are compared ignoring case, because names that differ only in case,
+    such as ``"data.ttl"`` and ``"DATA.ttl"``, name the same file on
+    case-insensitive file systems (the default on Windows and macOS).
+    """
     ids_by_name: dict[str, list[str]] = {}
     for resource, name in zip(resources, names, strict=True):
-        ids_by_name.setdefault(name, []).append(resource.id)
+        ids_by_name.setdefault(name.casefold(), []).append(resource.id)
     duplicates = {name: ids for name, ids in ids_by_name.items() if len(ids) > 1}
     if duplicates:
         raise ValidationError(
-            f"resources map to the same local file names: {duplicates}"
+            "resources map to the same local file names, ignoring case: "
+            f"{duplicates}"
         )
 
 
@@ -203,13 +210,15 @@ def check_local_conflicts(
     """Reject local paths that would prevent writing the targets.
 
     `FileExistsError` is raised first for local paths that block a target
-    regardless of `overwrite` (`directory` is not a directory, or a target is
-    a directory), then for existing targets when `overwrite` is False.
+    regardless of `overwrite` (`directory`, or its nearest existing ancestor
+    if it does not exist yet, is not a directory, or a target is a
+    directory), then for existing targets when `overwrite` is False.
     """
     base = Path(directory)
     blocking: list[Path] = []
-    if os.path.lexists(base) and not base.is_dir():
-        blocking.append(base)
+    blocked_base = blocking_ancestor(base)
+    if blocked_base is not None:
+        blocking.append(blocked_base)
     blocking.extend(target for target in targets if target.is_dir())
     if blocking:
         raise FileExistsError(

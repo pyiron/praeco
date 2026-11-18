@@ -5,7 +5,6 @@ The expected behavior comes from the approved API of #106: the token rule
 error handling.
 """
 
-import contextlib
 import json
 import os
 import sys
@@ -349,15 +348,19 @@ class TestDownloadRequests(_TempDirTestCase):
                 resource("link-1", url="https://other.test/a.ttl", url_type="")
             ),
         }
+        directories = {"file": file_path, "below a file": file_path / "downloads"}
         for label, payload in packages.items():
-            for overwrite in (False, True):
-                with self.subTest(package=label, overwrite=overwrite):
-                    c, session = make_client([action(payload)])
+            for kind, directory in directories.items():
+                for overwrite in (False, True):
+                    with self.subTest(
+                        package=label, directory=kind, overwrite=overwrite
+                    ):
+                        c, session = make_client([action(payload)])
 
-                    with self.assertRaises(FileExistsError):
-                        c.resources.download_all(
-                            "pkg-1", directory=file_path, overwrite=overwrite
-                        )
+                        with self.assertRaises(FileExistsError):
+                            c.resources.download_all(
+                                "pkg-1", directory=directory, overwrite=overwrite
+                            )
 
                     self.assertEqual(len(session.calls), 1)
                     self.assertEqual(tree(self.root), ["file.txt"])
@@ -952,6 +955,30 @@ class TestLocalChecks(_TempDirTestCase):
                 self.assertEqual(len(session.calls), 1)
                 self.assertEqual(file_path.read_text(), "keep")
 
+    def test_directory_below_a_file_raises_before_content(self):
+        file_path = self.root / "file.txt"
+        file_path.write_text("keep")
+        directory = file_path / "downloads"
+        for overwrite in (False, True):
+            with self.subTest(overwrite=overwrite):
+                c, session = make_client([action(resource())])
+
+                with self.assertRaises(FileExistsError):
+                    c.resources.download(
+                        "res-1", directory=directory, overwrite=overwrite
+                    )
+
+                self.assertEqual(len(session.calls), 1)
+                c, session = make_client([action(self.two_uploads())])
+
+                with self.assertRaises(FileExistsError):
+                    c.resources.download_all(
+                        "pkg-1", directory=directory, overwrite=overwrite
+                    )
+
+                self.assertEqual(len(session.calls), 1)
+                self.assertEqual(file_path.read_text(), "keep")
+
     def test_target_that_is_a_directory_raises_also_with_overwrite(self):
         (self.root / "b.ttl").mkdir()
         (self.root / "data.ttl").mkdir()
@@ -1055,20 +1082,27 @@ class TestLocalChecks(_TempDirTestCase):
                 self.assertEqual(len(session.calls), 1)
                 self.assertEqual(tree(self.root), [])
 
-    def test_names_differing_only_in_case_are_not_duplicates(self):
+    def test_names_differing_only_in_case_are_duplicates(self):
         resources = [
             resource("res-1", url=upload_url("data.ttl")),
-            resource("res-2", url=upload_url("DATA.ttl")),
+            resource("res-2", url=upload_url("other.ttl")),
+            resource("res-3", url=upload_url("DATA.ttl")),
         ]
-        c, session = make_client(
-            [action(package(*resources)), content(b"1"), content(b"2")]
-        )
+        for overwrite in (False, True):
+            with self.subTest(overwrite=overwrite):
+                c, session = make_client([action(package(*resources))])
 
-        # On case-insensitive file systems the second target exists by then.
-        with contextlib.suppress(FileExistsError):
-            _ = c.resources.download_all("pkg-1", directory=self.root)
+                with self.assertRaises(ValidationError) as caught:
+                    c.resources.download_all(
+                        "pkg-1", directory=self.root, overwrite=overwrite
+                    )
 
-        self.assertEqual(len(session.calls), 3)
+                message = str(caught.exception)
+                self.assertIn("ignoring case", message)
+                self.assertIn("'res-1', 'res-3'", message)
+                self.assertNotIn("res-2", message)
+                self.assertEqual(len(session.calls), 1)
+                self.assertEqual(tree(self.root), [])
 
     def test_name_errors_come_before_local_path_errors(self):
         file_path = self.root / "file.txt"

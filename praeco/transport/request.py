@@ -37,9 +37,12 @@ def shorten_error_text(text: str, *, limit: int = ERROR_TEXT_LIMIT) -> str:
     return f"{excerpt}... ({len(text)} characters; see response_text)"
 
 
-def _raise_for_status_with_body(resp: requests.Response) -> None:
+def raise_for_status(resp: requests.Response) -> None:
     """
     Raise `HttpError` if the response indicates an HTTP error.
+
+    Only an error response's body is read, so a successful streamed response
+    can be checked before its body is consumed.
 
     Parameters
     ----------
@@ -83,7 +86,7 @@ def read_json(resp: requests.Response) -> Any:
     HttpError
         If status indicates error or JSON decoding fails.
     """
-    _raise_for_status_with_body(resp)
+    raise_for_status(resp)
     try:
         return resp.json()
     except ValueError as e:
@@ -115,5 +118,5 @@ def read_text(resp: requests.Response) -> str:
     HttpError
         If status indicates error.
     """
-    _raise_for_status_with_body(resp)
+    raise_for_status(resp)
     return resp.text

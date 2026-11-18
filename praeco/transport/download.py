@@ -13,6 +13,40 @@ import requests
 from praeco.exceptions import ValidationError
 
 
+def blocking_ancestor(directory: str | Path) -> Path | None:
+    """Return the local path that prevents creating `directory`, if any.
+
+    The nearest existing path among `directory` and its ancestors decides:
+    if it is a directory, `directory` exists or can be created and None is
+    returned; otherwise, for example for a regular file or a dangling
+    symlink, that path is returned. Nothing is created.
+
+    Both the ancestors as written and those of the resolved path are
+    checked. The written ones catch a non-directory that ``..`` steps out
+    of, such as ``file/../downloads``; the resolved ones catch one reached
+    through ``..`` after a missing component, such as
+    ``missing/../file/downloads``.
+    """
+    path = Path(directory)
+    for candidate in (path, Path(os.path.realpath(path))):
+        existing = _nearest_existing(candidate)
+        if existing is not None and not existing.is_dir():
+            return existing
+    return None
+
+
+def _nearest_existing(path: Path) -> Path | None:
+    """Return the nearest existing path among `path` and its ancestors."""
+    return next(
+        (
+            candidate
+            for candidate in (path, *path.parents)
+            if os.path.lexists(candidate)
+        ),
+        None,
+    )
+
+
 def write_response_to_path(
     response: requests.Response,
     path: str | Path,

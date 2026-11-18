@@ -5,7 +5,7 @@ import requests
 from praeco.exceptions import HttpError
 from praeco.transport.request import (
     ERROR_TEXT_LIMIT,
-    _raise_for_status_with_body,
+    raise_for_status,
     read_json,
     shorten_error_text,
 )
@@ -83,7 +83,7 @@ class TestShortenErrorText(unittest.TestCase):
         self.assertEqual(message, "abc... (7 characters; see response_text)")
 
 
-class TestRaiseForStatusWithBody(unittest.TestCase):
+class TestRaiseForStatus(unittest.TestCase):
     def test_http_error_is_wrapped_as_http_error(self):
         resp = _FakeResponse(
             status_code=404,
@@ -93,7 +93,7 @@ class TestRaiseForStatusWithBody(unittest.TestCase):
         )
 
         with self.assertRaises(HttpError) as ctx:
-            _raise_for_status_with_body(resp)
+            raise_for_status(resp)
 
         err = ctx.exception
         self.assertEqual(err.method, "GET")
@@ -111,7 +111,7 @@ class TestRaiseForStatusWithBody(unittest.TestCase):
         )
 
         with self.assertRaises(HttpError) as ctx:
-            _raise_for_status_with_body(resp)
+            raise_for_status(resp)
 
         self.assertEqual(ctx.exception.method, "HTTP")
 

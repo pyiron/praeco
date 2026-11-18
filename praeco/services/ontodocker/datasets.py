@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
@@ -10,6 +11,8 @@ from typing import TYPE_CHECKING
 import rdflib
 
 from praeco.exceptions import ValidationError
+from praeco.transport.download import blocking_ancestor, write_response_to_path
+from praeco.transport.request import raise_for_status
 from praeco.transport.url import join_url
 
 if TYPE_CHECKING:
@@ -98,15 +101,23 @@ class DatasetsResource:
         """
         return self.client.get_text(self._dataset_url(name))
 
-    def download_turtle(self, name: str, filename: str | Path) -> Path:
+    def download_turtle(
+        self, name: str, filename: str | Path, *, overwrite: bool = False
+    ) -> Path:
         """Download a dataset and save it to a Turtle file.
+
+        The response is streamed to a temporary file next to the target and
+        moved into place once complete, so a failed download leaves no
+        partial file. The bytes are written as the server sends them.
 
         Parameters
         ----------
         name
             Dataset name.
         filename
-            Output file path written with UTF-8 encoding.
+            Output file path. Missing parent directories are created.
+        overwrite
+            Replace an existing file instead of raising `FileExistsError`.
 
         Returns
         -------
@@ -117,16 +128,30 @@ class DatasetsResource:
         ------
         ValidationError
             If `name` is empty/blank, or `filename` is blank when provided as a string.
+        FileExistsError
+            Before the request: if `filename` exists and `overwrite` is False,
+            or, also with `overwrite`, if `filename` is a directory or a
+            non-directory path is in the way of its parent directories.
+        HttpError
+            If the server responds with an error status.
         OSError
-            If the file cannot be written (e.g. permissions, missing directory).
+            If the file cannot be written (e.g. permissions).
         """
         if isinstance(filename, str) and not filename.strip():
             raise ValidationError("filename must be a non-empty path (str/Path)")
 
         path = Path(filename)
-        content = self.fetch_turtle(name)
-        _ = path.write_text(content, encoding="utf-8")
-        return path
+        url = self._dataset_url(name)
+        _check_download_target(path, overwrite=overwrite)
+        resp = self.client.request("GET", url, stream=True)
+        try:
+            raise_for_status(resp)
+        except BaseException:
+            # Also if reading the error body fails, for example on a dropped
+            # connection; write_response_to_path closes it otherwise.
+            resp.close()
+            raise
+        return write_response_to_path(resp, path, overwrite=overwrite)
 
     def upload_turtlefile(self, name: str, turtlefile: str | Path) -> str:
         """Upload a Turtle (.ttl) file into an existing dataset.
@@ -208,3 +233,14 @@ class DatasetsResource:
         bio = BytesIO(ttl_bytes)
         files = {"file": ("graph.ttl", bio, "text/turtle")}
         return self.client.post_text(url, files=files)
+
+
+def _check_download_target(path: Path, *, overwrite: bool) -> None:
+    """Reject a local target that cannot or must not be written."""
+    blocking = blocking_ancestor(path.parent)
+    if blocking is None and path.is_dir():
+        blocking = path
+    if blocking is not None:
+        raise FileExistsError(f"local path blocks target file: {blocking}")
+    if not overwrite and os.path.lexists(path):
+        raise FileExistsError(f"target file already exists: {path}")

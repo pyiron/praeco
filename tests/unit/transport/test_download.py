@@ -7,7 +7,7 @@ from typing import Any, cast
 from unittest import mock
 
 from praeco.exceptions import ValidationError
-from praeco.transport.download import write_response_to_path
+from praeco.transport.download import blocking_ancestor, write_response_to_path
 
 # Reference MD5 digests (RFC 1321 test suite and the common "hello world").
 MD5_ABC = "900150983cd24fb0d6963f7d28e17f72"
@@ -59,6 +59,89 @@ def _write(response: StreamingResponse, path: Path, **kwargs: Any) -> Path:
 def _tree(root: Path) -> list[str]:
     """Return every path below `root`, including hidden temporary files."""
     return sorted(str(p.relative_to(root)) for p in root.rglob("*"))
+
+
+class TestBlockingAncestor(unittest.TestCase):
+    def test_existing_directory_is_not_blocked(self):
+        with TemporaryDirectory() as tmp:
+            self.assertIsNone(blocking_ancestor(tmp))
+
+    def test_missing_directory_below_a_directory_is_not_blocked(self):
+        with TemporaryDirectory() as tmp:
+            directory = Path(tmp) / "a" / "b"
+
+            self.assertIsNone(blocking_ancestor(directory))
+            self.assertFalse(directory.exists(), msg="nothing is created")
+
+    def test_regular_file_as_directory_is_returned(self):
+        with TemporaryDirectory() as tmp:
+            file = Path(tmp) / "file"
+            file.write_bytes(b"")
+
+            self.assertEqual(blocking_ancestor(file), file)
+
+    def test_regular_file_above_a_missing_directory_is_returned(self):
+        with TemporaryDirectory() as tmp:
+            file = Path(tmp) / "file"
+            file.write_bytes(b"")
+
+            self.assertEqual(blocking_ancestor(file / "sub" / "dir"), file)
+
+    def test_accepts_str_path(self):
+        with TemporaryDirectory() as tmp:
+            file = Path(tmp) / "file"
+            file.write_bytes(b"")
+
+            self.assertEqual(blocking_ancestor(str(file / "sub")), file)
+
+    def test_relative_missing_path_is_not_blocked(self):
+        with TemporaryDirectory() as tmp:
+            cwd = os.getcwd()
+            try:
+                os.chdir(tmp)
+                self.assertIsNone(blocking_ancestor(Path("missing") / "dir"))
+            finally:
+                os.chdir(cwd)
+
+    def test_file_reached_through_dotdot_after_a_missing_part_is_returned(self):
+        with TemporaryDirectory() as tmp:
+            file = Path(tmp) / "file"
+            file.write_bytes(b"")
+            directory = Path(tmp) / "missing" / ".." / "file" / "downloads"
+
+            blocker = blocking_ancestor(directory)
+
+            self.assertIsNotNone(blocker)
+            self.assertTrue(os.path.samefile(cast(Path, blocker), file))
+
+    def test_file_that_dotdot_steps_out_of(self):
+        with TemporaryDirectory() as tmp:
+            file = Path(tmp) / "file"
+            file.write_bytes(b"")
+
+            blocker = blocking_ancestor(file / ".." / "downloads")
+
+            if os.name == "nt":
+                # Windows resolves `..` lexically, so the path can be created.
+                self.assertIsNone(blocker)
+            else:
+                self.assertEqual(blocker, file)
+
+    def test_dotdot_through_existing_directories_is_not_blocked(self):
+        with TemporaryDirectory() as tmp:
+            (Path(tmp) / "a").mkdir()
+
+            self.assertIsNone(blocking_ancestor(Path(tmp) / "a" / ".." / "b"))
+
+    def test_dangling_symlink_is_returned(self):
+        with TemporaryDirectory() as tmp:
+            link = Path(tmp) / "link"
+            try:
+                link.symlink_to(Path(tmp) / "missing")
+            except (OSError, NotImplementedError) as exc:
+                self.skipTest(f"symlinks unavailable: {exc}")
+
+            self.assertEqual(blocking_ancestor(link / "sub"), link)
 
 
 class TestWriteResponseToPath(unittest.TestCase):

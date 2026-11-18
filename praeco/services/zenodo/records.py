@@ -13,7 +13,7 @@ from praeco.exceptions import ValidationError
 from praeco.services.zenodo._response import raise_zenodo_error, read_zenodo_json
 from praeco.services.zenodo._urls import record_draft_files_url, record_files_url
 from praeco.services.zenodo.models import DepositionInfo
-from praeco.transport.download import write_response_to_path
+from praeco.transport.download import blocking_ancestor, write_response_to_path
 
 if TYPE_CHECKING:
     from praeco.services.zenodo.client import ZenodoClient
@@ -264,19 +264,27 @@ def _check_no_target_collisions(keys: Sequence[str], targets: Sequence[Path]) ->
     ``"a/b"``. Keys are compared lexically, then by their resolved parent
     directories, so a symlink inside the directory cannot alias two keys. The
     final component stays unresolved because a target symlink is replaced,
-    not followed. Case is not folded.
+    not followed. Both comparisons ignore case, because keys that differ only
+    in case, such as ``"README.md"`` and ``"readme.md"``, name the same file
+    on case-insensitive file systems (the default on Windows and macOS).
     """
     collisions = _colliding_keys(
-        (key, Path(os.path.normpath(key)).parts) for key in keys
+        (key, _folded(Path(os.path.normpath(key)).parts)) for key in keys
     ) or _colliding_keys(
         # Resolved twice for the reason given in `_safe_target_path`.
-        (key, (target.parent.resolve().resolve() / target.name).parts)
+        (key, _folded((target.parent.resolve().resolve() / target.name).parts))
         for key, target in zip(keys, targets, strict=True)
     )
     if collisions:
         raise ValidationError(
-            f"file keys map to the same or nested local paths: {collisions}"
+            "file keys map to the same or nested local paths, ignoring case: "
+            f"{collisions}"
         )
+
+
+def _folded(parts: tuple[str, ...]) -> tuple[str, ...]:
+    """Return path parts in a form that compares case-insensitively."""
+    return tuple(part.casefold() for part in parts)
 
 
 def _colliding_keys(
@@ -301,13 +309,16 @@ def _colliding_keys(
 def _check_no_local_conflicts(directory: str | Path, targets: Sequence[Path]) -> None:
     """Reject local paths that would block writing a target.
 
-    A target must not be an existing directory, and `directory` and every
-    path between it and the target must be a directory if it exists.
+    A target must not be an existing directory, and every path between
+    `directory` and the target must be a directory if it exists. `directory`
+    itself, or its nearest existing ancestor if it does not exist yet, must
+    be a directory too.
     """
     base = Path(directory)
     blocking: list[Path] = []
-    if os.path.lexists(base) and not base.is_dir():
-        blocking.append(base)
+    blocked_base = blocking_ancestor(base)
+    if blocked_base is not None:
+        blocking.append(blocked_base)
     for target in targets:
         if target.is_dir():
             blocking.append(target)
