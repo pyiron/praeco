@@ -3,7 +3,12 @@ import unittest
 import requests
 
 from praeco.exceptions import HttpError
-from praeco.transport.request import _raise_for_status_with_body, read_json
+from praeco.transport.request import (
+    ERROR_TEXT_LIMIT,
+    _raise_for_status_with_body,
+    read_json,
+    shorten_error_text,
+)
 
 
 class _FakeRequest:
@@ -45,6 +50,37 @@ class _FakeResponse:
         if self._json_exc is not None:
             raise self._json_exc
         return self._json_value
+
+
+class TestShortenErrorText(unittest.TestCase):
+    def test_short_text_is_returned_with_collapsed_whitespace(self):
+        self.assertEqual(
+            shorten_error_text("  Server\n\t unavailable  "),
+            "Server unavailable",
+        )
+
+    def test_text_at_the_limit_is_not_cut(self):
+        text = "x" * ERROR_TEXT_LIMIT
+
+        self.assertEqual(shorten_error_text(text), text)
+
+    def test_long_text_is_cut_and_reports_the_full_length(self):
+        body = "<html>\n  <body>\n" + "a" * 500 + "\n  </body>\n</html>\n"
+
+        message = shorten_error_text(body)
+
+        collapsed = " ".join(body.split())
+        self.assertEqual(
+            message,
+            f"{collapsed[:ERROR_TEXT_LIMIT]}... "
+            f"({len(body)} characters; see response_text)",
+            msg="the length refers to the full body, not the collapsed one",
+        )
+
+    def test_trailing_space_before_the_cut_is_removed(self):
+        message = shorten_error_text("abc def", limit=4)
+
+        self.assertEqual(message, "abc... (7 characters; see response_text)")
 
 
 class TestRaiseForStatusWithBody(unittest.TestCase):

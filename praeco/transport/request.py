@@ -6,6 +6,36 @@ import requests
 
 from praeco.exceptions import HttpError
 
+ERROR_TEXT_LIMIT = 200
+
+
+def shorten_error_text(text: str, *, limit: int = ERROR_TEXT_LIMIT) -> str:
+    """
+    Shorten a response body for use in an exception message.
+
+    Whitespace runs, such as the line breaks and indentation of an HTML error
+    page, are collapsed to single spaces. Text that is still longer than
+    `limit` is cut, and a note gives the length of the full body, which stays
+    available as `HttpError.response_text`.
+
+    Parameters
+    ----------
+    text
+        Response body.
+    limit
+        Maximum number of characters kept from the body.
+
+    Returns
+    -------
+    message
+        The collapsed body, shortened if necessary.
+    """
+    collapsed = " ".join(text.split())
+    if len(collapsed) <= limit:
+        return collapsed
+    excerpt = collapsed[:limit].rstrip()
+    return f"{excerpt}... ({len(text)} characters; see response_text)"
+
 
 def _raise_for_status_with_body(resp: requests.Response) -> None:
     """
