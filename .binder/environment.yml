@@ -5,7 +5,7 @@ dependencies:
 - hatch-vcs =0.5.0
 - python >=3.11,<3.14
 - pandas =3.1.0
-- pydantic =2.14.2
+- pydantic =2.14.3
 - rdflib =7.6.0
 - requests =2.34.2
 - sparqlwrapper =2.0.0
