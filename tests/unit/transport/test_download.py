@@ -103,6 +103,36 @@ class TestBlockingAncestor(unittest.TestCase):
             finally:
                 os.chdir(cwd)
 
+    def test_file_reached_through_dotdot_after_a_missing_part_is_returned(self):
+        with TemporaryDirectory() as tmp:
+            file = Path(tmp) / "file"
+            file.write_bytes(b"")
+            directory = Path(tmp) / "missing" / ".." / "file" / "downloads"
+
+            blocker = blocking_ancestor(directory)
+
+            self.assertIsNotNone(blocker)
+            self.assertTrue(os.path.samefile(cast(Path, blocker), file))
+
+    def test_file_that_dotdot_steps_out_of(self):
+        with TemporaryDirectory() as tmp:
+            file = Path(tmp) / "file"
+            file.write_bytes(b"")
+
+            blocker = blocking_ancestor(file / ".." / "downloads")
+
+            if os.name == "nt":
+                # Windows resolves `..` lexically, so the path can be created.
+                self.assertIsNone(blocker)
+            else:
+                self.assertEqual(blocker, file)
+
+    def test_dotdot_through_existing_directories_is_not_blocked(self):
+        with TemporaryDirectory() as tmp:
+            (Path(tmp) / "a").mkdir()
+
+            self.assertIsNone(blocking_ancestor(Path(tmp) / "a" / ".." / "b"))
+
     def test_dangling_symlink_is_returned(self):
         with TemporaryDirectory() as tmp:
             link = Path(tmp) / "link"
