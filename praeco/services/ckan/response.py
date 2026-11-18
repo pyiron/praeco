@@ -8,6 +8,7 @@ from typing import Any, NoReturn
 import requests
 
 from praeco.services.ckan.exceptions import CkanApiError
+from praeco.transport.request import shorten_error_text
 
 
 def read_ckan_result(resp: requests.Response) -> Any:
@@ -94,5 +95,5 @@ def _error_message(payload: Any | None, resp: requests.Response) -> str:
 
     text = getattr(resp, "text", None)
     if isinstance(text, str) and text.strip():
-        return text.strip()
+        return shorten_error_text(text)
     return "CKAN API request failed."
