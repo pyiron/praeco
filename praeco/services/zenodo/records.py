@@ -264,19 +264,27 @@ def _check_no_target_collisions(keys: Sequence[str], targets: Sequence[Path]) ->
     ``"a/b"``. Keys are compared lexically, then by their resolved parent
     directories, so a symlink inside the directory cannot alias two keys. The
     final component stays unresolved because a target symlink is replaced,
-    not followed. Case is not folded.
+    not followed. Both comparisons ignore case, because keys that differ only
+    in case, such as ``"README.md"`` and ``"readme.md"``, name the same file
+    on case-insensitive file systems (the default on Windows and macOS).
     """
     collisions = _colliding_keys(
-        (key, Path(os.path.normpath(key)).parts) for key in keys
+        (key, _folded(Path(os.path.normpath(key)).parts)) for key in keys
     ) or _colliding_keys(
         # Resolved twice for the reason given in `_safe_target_path`.
-        (key, (target.parent.resolve().resolve() / target.name).parts)
+        (key, _folded((target.parent.resolve().resolve() / target.name).parts))
         for key, target in zip(keys, targets, strict=True)
     )
     if collisions:
         raise ValidationError(
-            f"file keys map to the same or nested local paths: {collisions}"
+            "file keys map to the same or nested local paths, ignoring case: "
+            f"{collisions}"
         )
+
+
+def _folded(parts: tuple[str, ...]) -> tuple[str, ...]:
+    """Return path parts in a form that compares case-insensitively."""
+    return tuple(part.casefold() for part in parts)
 
 
 def _colliding_keys(

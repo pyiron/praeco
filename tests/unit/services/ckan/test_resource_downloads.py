@@ -5,7 +5,6 @@ The expected behavior comes from the approved API of #106: the token rule
 error handling.
 """
 
-import contextlib
 import json
 import os
 import sys
@@ -1083,20 +1082,27 @@ class TestLocalChecks(_TempDirTestCase):
                 self.assertEqual(len(session.calls), 1)
                 self.assertEqual(tree(self.root), [])
 
-    def test_names_differing_only_in_case_are_not_duplicates(self):
+    def test_names_differing_only_in_case_are_duplicates(self):
         resources = [
             resource("res-1", url=upload_url("data.ttl")),
-            resource("res-2", url=upload_url("DATA.ttl")),
+            resource("res-2", url=upload_url("other.ttl")),
+            resource("res-3", url=upload_url("DATA.ttl")),
         ]
-        c, session = make_client(
-            [action(package(*resources)), content(b"1"), content(b"2")]
-        )
+        for overwrite in (False, True):
+            with self.subTest(overwrite=overwrite):
+                c, session = make_client([action(package(*resources))])
 
-        # On case-insensitive file systems the second target exists by then.
-        with contextlib.suppress(FileExistsError):
-            _ = c.resources.download_all("pkg-1", directory=self.root)
+                with self.assertRaises(ValidationError) as caught:
+                    c.resources.download_all(
+                        "pkg-1", directory=self.root, overwrite=overwrite
+                    )
 
-        self.assertEqual(len(session.calls), 3)
+                message = str(caught.exception)
+                self.assertIn("ignoring case", message)
+                self.assertIn("'res-1', 'res-3'", message)
+                self.assertNotIn("res-2", message)
+                self.assertEqual(len(session.calls), 1)
+                self.assertEqual(tree(self.root), [])
 
     def test_name_errors_come_before_local_path_errors(self):
         file_path = self.root / "file.txt"

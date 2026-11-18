@@ -842,12 +842,26 @@ class TestRecordFilesLocalPathChecks(_TempDirTestCase):
         self.assert_rejected_before_content(["a", "a/b"], ValidationError)
         self.assertEqual((self.root / "a").read_bytes(), b"original")
 
-    def test_keys_differing_only_in_case_do_not_collide(self):
-        keys = ["A.txt", "a.txt", "Dir/x", "dir/x/y"]
+    def test_keys_differing_only_in_case_collide(self):
+        pairs = [
+            ["README.md", "readme.md"],
+            ["Dir/x", "dir/x"],
+            ["Dir/x", "dir/x/y"],
+            ["a", "A/b"],
+        ]
+        for keys in pairs:
+            for overwrite in (False, True):
+                self.assert_rejected_before_content(
+                    keys, ValidationError, overwrite=overwrite
+                )
 
-        targets = _target_paths(self.root, keys, overwrite=False)
+    def test_case_collision_message_names_both_keys(self):
+        with self.assertRaises(ValidationError) as caught:
+            _ = _target_paths(self.root, ["README.md", "readme.md"], overwrite=True)
 
-        self.assertEqual(targets, [self.root / key for key in keys])
+        message = str(caught.exception)
+        self.assertIn("ignoring case", message)
+        self.assertIn("('README.md', 'readme.md')", message)
 
     def test_directory_that_is_a_file_blocks_downloads(self):
         blocker = self.root / "blocker"

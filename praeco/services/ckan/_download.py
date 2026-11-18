@@ -152,14 +152,20 @@ def default_file_name(resource: CkanResourceInfo, url: str) -> str:
 def check_unique_names(
     resources: Sequence[CkanResourceInfo], names: Sequence[str]
 ) -> None:
-    """Raise `ValidationError` if several resources map to the same name."""
+    """Raise `ValidationError` if several resources map to the same name.
+
+    Names are compared ignoring case, because names that differ only in case,
+    such as ``"data.ttl"`` and ``"DATA.ttl"``, name the same file on
+    case-insensitive file systems (the default on Windows and macOS).
+    """
     ids_by_name: dict[str, list[str]] = {}
     for resource, name in zip(resources, names, strict=True):
-        ids_by_name.setdefault(name, []).append(resource.id)
+        ids_by_name.setdefault(name.casefold(), []).append(resource.id)
     duplicates = {name: ids for name, ids in ids_by_name.items() if len(ids) > 1}
     if duplicates:
         raise ValidationError(
-            f"resources map to the same local file names: {duplicates}"
+            "resources map to the same local file names, ignoring case: "
+            f"{duplicates}"
         )
 
 
