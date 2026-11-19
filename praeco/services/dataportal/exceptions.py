@@ -17,7 +17,9 @@ class DatasetUploadError(PraecoError):
     Attributes
     ----------
     dataset
-        The dataset as created, still private.
+        The dataset as returned when it was created, private. This is a
+        snapshot: if the request to make the dataset public failed, it may
+        have been applied anyway, so read the dataset again to see its state.
     assets
         The assets uploaded before the failure, in upload order.
     deleted

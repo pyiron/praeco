@@ -1,3 +1,4 @@
+import os
 import re
 import unittest
 from pathlib import Path
@@ -116,6 +117,13 @@ def metadata(**overrides: Any) -> DataportalMetadata:
     return DataportalMetadata(**fields)
 
 
+def mutated(md: DataportalMetadata, **changes: Any) -> DataportalMetadata:
+    """Change fields after construction, bypassing the constructor's checks."""
+    for field_name, value in changes.items():
+        setattr(md, field_name, value)
+    return md
+
+
 def write_files(directory: str, *names: str) -> list[Path]:
     paths = [Path(directory) / name for name in names]
     for path in paths:
@@ -197,6 +205,12 @@ class TestCreateWithAssets(unittest.TestCase):
                     "metadata.private to be True or False",
                 ),
                 (
+                    "private changed to a non-bool after construction",
+                    mutated(metadata(), private=""),
+                    paths,
+                    "private must be a boolean",
+                ),
+                (
                     "owner_org unset",
                     metadata(owner_org=None),
                     paths,
@@ -224,6 +238,20 @@ class TestCreateWithAssets(unittest.TestCase):
                     client.datasets.create_with_assets(md, given)
 
         self.assertEqual(recorder.calls, [])
+
+    @unittest.skipIf(os.name == "nt", "Windows does not allow such file names")
+    def test_blank_file_name_is_rejected_before_any_request(self):
+        client, recorder = client_with()
+
+        with TemporaryDirectory() as directory:
+            paths = write_files(directory, "one.txt", "   ")
+
+            with self.assertRaisesRegex(
+                ValidationError, "upload filename must be non-empty"
+            ):
+                client.datasets.create_with_assets(metadata(), paths)
+
+        self.assertEqual(recorder.calls, [], msg="no dataset is created")
 
     def test_failing_create_propagates_unchanged(self):
         client, recorder = client_with({"create": RuntimeError("create failed")})
@@ -314,9 +342,14 @@ class TestCreateWithAssets(unittest.TestCase):
         self.assertEqual(call_names(recorder), ["create", "upload", "delete"])
 
     def test_failed_final_step_carries_every_asset(self):
-        for private, step, final_call in (
-            (False, "making it public", "patch"),
-            (True, "reading it back", "show"),
+        for private, step, final_call, outcome in (
+            (
+                False,
+                "making it public",
+                "patch",
+                "the dataset was kept and may already be public",
+            ),
+            (True, "reading it back", "show", "the private dataset was kept"),
         ):
             with self.subTest(private=private):
                 client, recorder = client_with(
@@ -334,12 +367,34 @@ class TestCreateWithAssets(unittest.TestCase):
                 error = ctx.exception
                 self.assertEqual(len(error.assets), 2)
                 self.assertIn(
-                    f"but {step} failed after 2 of 2 files were uploaded",
+                    f"but {step} failed after 2 of 2 files were uploaded; {outcome}:",
                     str(error),
                 )
                 self.assertEqual(
                     call_names(recorder), ["create", "upload", "upload", final_call]
                 )
+
+    def test_failed_cleanup_after_failed_publication_says_it_may_be_public(self):
+        client, _ = client_with(
+            {
+                "patch": RuntimeError("response lost"),
+                "delete": RuntimeError("delete failed"),
+            }
+        )
+
+        with TemporaryDirectory() as directory:
+            paths = write_files(directory, "one.txt")
+
+            with self.assertRaises(DatasetUploadError) as ctx:
+                client.datasets.create_with_assets(
+                    metadata(private=False), paths, cleanup_on_error=True
+                )
+
+        self.assertIs(ctx.exception.deleted, False)
+        self.assertIn(
+            "deleting the dataset failed too; it may already be public",
+            str(ctx.exception),
+        )
 
     def test_interrupt_propagates_without_cleanup(self):
         client, recorder = client_with({"upload": (0, KeyboardInterrupt())})

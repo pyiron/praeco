@@ -13,6 +13,7 @@ from praeco.metadata import PublicationMetadata
 from praeco.services.dataportal._uploads import (
     UploadPaths,
     check_upload_files,
+    default_asset_name,
     normalize_upload_paths,
 )
 from praeco.services.dataportal.exceptions import DatasetUploadError
@@ -57,9 +58,11 @@ class DatasetsResource:
         All arguments are checked before the first request. A failing
         dataset creation propagates unchanged, since nothing was created.
         An error after that raises `DatasetUploadError`, which carries the
-        dataset and the assets uploaded so far. By default the private,
+        dataset as created and the assets uploaded so far. By default the
         incomplete dataset is kept for inspection or for uploading the
-        remaining files with `client.assets.upload`.
+        remaining files with `client.assets.upload`. It is still private,
+        unless the request to make it public failed: that request may have
+        been applied anyway, so read the dataset again to see its state.
 
         Parameters
         ----------
@@ -84,26 +87,27 @@ class DatasetsResource:
         Raises
         ------
         ValidationError
-            Before any request, if `metadata` is not `DataportalMetadata`,
-            `private` or `owner_org` is not set, `paths` is empty, or a path
-            is not a file.
+            Before any request, if `metadata` is not valid
+            `DataportalMetadata`, `private` or `owner_org` is not set, `paths`
+            is empty, a path is not a file, or a file name is blank.
         DatasetUploadError
             If uploading, making the dataset public, or reading it back
             fails after the dataset was created.
         """
         upload_paths = _checked_create_with_assets_arguments(metadata, paths)
+        make_public = metadata.private is False
         dataset = self.create(dataclasses.replace(metadata, private=True))
         assets: list[DataportalAssetInfo] = []
         step = "uploading its files"
         try:
             for path in upload_paths:
                 assets.append(self.client.assets.upload(dataset, path))
-            if metadata.private:
-                step = "reading it back"
-                final = self.show(dataset)
-            else:
+            if make_public:
                 step = "making it public"
                 final = self.patch(dataset, {"private": False})
+            else:
+                step = "reading it back"
+                final = self.show(dataset)
         except Exception as exc:
             raise self._upload_error(
                 dataset,
@@ -112,6 +116,7 @@ class DatasetsResource:
                 step=step,
                 error=exc,
                 cleanup=cleanup_on_error,
+                visibility_unknown=step == "making it public",
             ) from exc
         return DatasetWithAssets(dataset=final, assets=assets)
 
@@ -124,6 +129,7 @@ class DatasetsResource:
         step: str,
         error: Exception,
         cleanup: bool,
+        visibility_unknown: bool,
     ) -> DatasetUploadError:
         delete_error: Exception | None = None
         if cleanup:
@@ -131,12 +137,20 @@ class DatasetsResource:
                 self.delete(dataset)
             except Exception as exc:
                 delete_error = exc
+        # A failed request to make the dataset public may still have been
+        # applied, for example if only its response was lost.
         if not cleanup:
-            outcome = "the private dataset was kept"
+            outcome = (
+                "the dataset was kept and may already be public"
+                if visibility_unknown
+                else "the private dataset was kept"
+            )
         elif delete_error is None:
             outcome = "the dataset was deleted"
         else:
-            outcome = "deleting the dataset failed too; it stays private"
+            outcome = "deleting the dataset failed too; " + (
+                "it may already be public" if visibility_unknown else "it stays private"
+            )
         upload_error = DatasetUploadError(
             f"dataset {dataset.name!r} ({dataset.id}) was created, but "
             f"{step} failed after {len(assets)} of {total} files were uploaded; "
@@ -214,6 +228,7 @@ def _checked_create_with_assets_arguments(
             "create_with_assets requires DataportalMetadata, "
             f"not {type(metadata).__name__}"
         )
+    metadata.validate()
     if metadata.private is None:
         raise ValidationError(
             "create_with_assets requires metadata.private to be True or False"
@@ -231,4 +246,6 @@ def _checked_create_with_assets_arguments(
             "use create for a dataset without files"
         )
     check_upload_files(upload_paths)
+    for path in upload_paths:
+        _ = default_asset_name(path)
     return upload_paths
