@@ -11,9 +11,10 @@ from urllib.parse import urlsplit
 from praeco.exceptions import ValidationError
 from praeco.services.dataportal._uploads import (
     UploadPath,
-    UploadPathList,
     UploadPaths,
+    UploadPathT,
     check_upload_files,
+    default_asset_name,
     normalize_upload_paths,
 )
 from praeco.services.dataportal.models import (
@@ -47,7 +48,7 @@ class AssetsResource:
     def upload(
         self,
         dataset: str | DataportalDatasetInfo,
-        path: UploadPathList,
+        path: list[UploadPathT] | tuple[UploadPathT, ...],
         *,
         name: str | None = None,
         description: str | None = None,
@@ -125,14 +126,21 @@ class AssetsResource:
         _add_if_present(options, "format", format)
         if content_type is not None:
             options["mimetype"] = _required_string(content_type, "content_type")
-        asset_name = _required_string(name, "name") if name is not None else None
+        asset_names = [
+            (
+                _required_string(name, "name")
+                if name is not None
+                else default_asset_name(upload_path)
+            )
+            for upload_path in upload_paths
+        ]
         if not upload_paths:
             return []
 
         package_id = _dataset_id(dataset)
         assets = [
             self._upload_one(package_id, upload_path, name=asset_name, options=options)
-            for upload_path in upload_paths
+            for upload_path, asset_name in zip(upload_paths, asset_names, strict=True)
         ]
         if isinstance(path, (str, Path)):
             return assets[0]
@@ -143,18 +151,10 @@ class AssetsResource:
         package_id: str,
         path: Path,
         *,
-        name: str | None,
+        name: str,
         options: Mapping[str, Any],
     ) -> DataportalAssetInfo:
-        payload: dict[str, Any] = {
-            "package_id": package_id,
-            "name": (
-                name
-                if name is not None
-                else _required_string(path.name, "upload filename")
-            ),
-            **options,
-        }
+        payload: dict[str, Any] = {"package_id": package_id, "name": name, **options}
         resource = self.client.resources.create(
             payload,
             upload=path,
@@ -197,7 +197,7 @@ class AssetsResource:
     def upload_rdf(
         self,
         dataset: str | DataportalDatasetInfo,
-        path: UploadPathList,
+        path: list[UploadPathT] | tuple[UploadPathT, ...],
         *,
         name: str | None = None,
         description: str | None = None,

@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import unittest
 from pathlib import Path
@@ -443,6 +444,20 @@ class TestMultiFileUpload(unittest.TestCase):
                     client.assets.upload("pkg-1", [paths[0], bad, paths[1]])
 
         self.assertEqual(resources.calls, [])
+
+    @unittest.skipIf(os.name == "nt", "Windows does not allow such file names")
+    def test_blank_file_name_is_rejected_before_the_first_upload(self):
+        client, resources = client_with_stub()
+
+        with TemporaryDirectory() as directory:
+            paths = write_files(directory, "one.txt", "   ")
+
+            with self.assertRaisesRegex(
+                ValidationError, "upload filename must be non-empty"
+            ):
+                client.assets.upload("pkg-1", paths)
+
+        self.assertEqual(resources.calls, [], msg="no asset is created")
 
     def test_blank_options_are_rejected_before_the_first_upload(self):
         client, resources = client_with_stub()
