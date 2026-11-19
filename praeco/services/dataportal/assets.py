@@ -2,13 +2,20 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypeAlias, overload
+from typing import TYPE_CHECKING, Any, overload
 from urllib.parse import urlsplit
 
 from praeco.exceptions import ValidationError
+from praeco.services.dataportal._uploads import (
+    UploadPath,
+    UploadPathList,
+    UploadPaths,
+    check_upload_files,
+    normalize_upload_paths,
+)
 from praeco.services.dataportal.models import (
     DataportalAssetInfo,
     DataportalDatasetInfo,
@@ -16,16 +23,6 @@ from praeco.services.dataportal.models import (
 
 if TYPE_CHECKING:
     from praeco.services.dataportal.client import DataportalClient
-
-UploadPath: TypeAlias = str | Path
-# A str is itself a Sequence[str], so the overload for several paths names
-# lists and tuples instead of Sequence: an argument typed `str | list[str]`
-# then resolves to the union return type, not to a list. Other sequences are
-# accepted too and resolve to the union.
-UploadPathList: TypeAlias = (
-    list[UploadPath] | list[str] | list[Path] | tuple[UploadPath, ...]
-)
-UploadPaths: TypeAlias = UploadPath | Sequence[UploadPath]
 
 
 @dataclass
@@ -114,14 +111,14 @@ class AssetsResource:
             If a path is not a file, an option is blank, or `name` or
             `description` is given for other than exactly one file.
         """
-        upload_paths = _upload_paths(path)
+        upload_paths = normalize_upload_paths(path)
         if len(upload_paths) != 1:
             for option, value in (("name", name), ("description", description)):
                 if value is not None:
                     raise ValidationError(
                         f"{option} is only supported for single-file uploads"
                     )
-        _check_files(upload_paths)
+        check_upload_files(upload_paths)
 
         options: dict[str, Any] = {}
         _add_if_present(options, "description", description)
@@ -300,18 +297,6 @@ class AssetsResource:
             directory=directory,
             overwrite=overwrite,
         )
-
-
-def _upload_paths(paths: UploadPaths) -> list[Path]:
-    if isinstance(paths, (str, Path)):
-        return [Path(paths)]
-    return [Path(path) for path in paths]
-
-
-def _check_files(paths: Sequence[Path]) -> None:
-    for path in paths:
-        if not path.is_file():
-            raise ValidationError(f"upload path must be a file: {path}")
 
 
 def _dataset_id(dataset: str | DataportalDatasetInfo) -> str:

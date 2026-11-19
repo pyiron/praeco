@@ -26,6 +26,10 @@ class DatasetUploadError(PraecoError):
         note.
     """
 
+    dataset: DataportalDatasetInfo
+    assets: list[DataportalAssetInfo]
+    deleted: bool
+
     def __init__(
         self,
         message: str,

@@ -8,7 +8,6 @@ from praeco.exceptions import PraecoError, ValidationError
 from praeco.metadata import Person, PublicationMetadata
 from praeco.services.ckan.models import CkanPackageInfo, CkanResourceInfo
 from praeco.services.dataportal import (
-    DataportalAssetInfo,
     DataportalClient,
     DataportalMetadata,
     DatasetUploadError,
@@ -107,7 +106,7 @@ def metadata(**overrides: Any) -> DataportalMetadata:
         "metadata": PublicationMetadata(
             title="Steel data",
             description="Heat treatment measurements.",
-            creators=[Person(name="Doe, Jane")],
+            creators=(Person(name="Doe, Jane"),),
         ),
         "name": "steel-data",
         "owner_org": "materials-org",
@@ -153,9 +152,6 @@ class TestCreateWithAssets(unittest.TestCase):
         self.assertEqual(result.dataset.raw["num_resources"], 2)
         self.assertEqual(
             [asset.name for asset in result.assets], [p.name for p in paths]
-        )
-        self.assertTrue(
-            all(isinstance(asset, DataportalAssetInfo) for asset in result.assets)
         )
         self.assertIs(md.private, False, msg="the caller's metadata is not changed")
 

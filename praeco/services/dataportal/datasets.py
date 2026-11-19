@@ -10,7 +10,11 @@ from typing import TYPE_CHECKING, Any, TypeAlias
 
 from praeco.exceptions import ValidationError
 from praeco.metadata import PublicationMetadata
-from praeco.services.dataportal.assets import UploadPaths, _check_files, _upload_paths
+from praeco.services.dataportal._uploads import (
+    UploadPaths,
+    check_upload_files,
+    normalize_upload_paths,
+)
 from praeco.services.dataportal.exceptions import DatasetUploadError
 from praeco.services.dataportal.metadata import DataportalMetadata
 from praeco.services.dataportal.models import (
@@ -220,11 +224,11 @@ def _checked_create_with_assets_arguments(
             "private until its files are uploaded, and CKAN keeps private "
             "datasets only in an organization"
         )
-    upload_paths = _upload_paths(paths)
+    upload_paths = normalize_upload_paths(paths)
     if not upload_paths:
         raise ValidationError(
             "create_with_assets requires at least one path; "
             "use create for a dataset without files"
         )
-    _check_files(upload_paths)
+    check_upload_files(upload_paths)
     return upload_paths
