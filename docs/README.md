@@ -272,6 +272,35 @@ result = client.sparql.query_json(
 )
 ```
 
+#### Creating a Dataset With Its Files
+
+`client.datasets.create_with_assets()` creates a dataset and uploads its files in one call. The dataset is created private, the files are uploaded one at a time, and only then is the metadata's `private` value applied, so an incomplete dataset is never public:
+
+```python
+from praeco.services.dataportal import DatasetUploadError
+
+metadata = DataportalMetadata(
+    metadata=publication,
+    name="praeco-dataportal-example",
+    owner_org="organization-id",
+    private=False,
+)
+
+try:
+    result = client.datasets.create_with_assets(metadata, ["data.csv", "README.md"])
+except DatasetUploadError as error:
+    error.dataset  # the private, incomplete dataset
+    error.assets  # the assets uploaded before the failure
+    raise
+
+result.dataset.private  # False
+result.assets  # list[DataportalAssetInfo], in the given order
+```
+
+The metadata must be a `DataportalMetadata` whose `private` is `True` or `False` and whose `owner_org` is set, because CKAN keeps private datasets only in an organization. `paths` takes one path or a non-empty list, and every path must be a file. These checks run before the first request and raise `ValidationError`. Each asset is named after its file; set names, descriptions or formats afterwards with `client.assets.patch()`. The method publishes nothing beyond what `private` says.
+
+If creating the dataset fails, the error propagates unchanged, since nothing was created. Any later error, while uploading, making the dataset public, or reading it back, raises `DatasetUploadError` with the original error as its cause. Its `dataset` and `assets` say what was created, and the private dataset is kept, so the remaining files can be uploaded with `client.assets.upload()` and the dataset made public with `client.datasets.patch(dataset, {"private": False})`. With `cleanup_on_error=True`, the dataset is deleted before the error is raised, and `error.deleted` says whether that succeeded; if not, the delete error is attached as a note. CKAN only marks a deleted dataset as deleted: its name stays taken until a sysadmin purges it, so a retry after a cleanup needs another name. An interruption such as `KeyboardInterrupt` propagates without cleanup.
+
 #### Downloading Assets
 
 `client.assets.download()` writes the content of one asset to a local file, and `client.assets.download_all()` writes the uploaded assets of a dataset. Both accept an id or a model:
