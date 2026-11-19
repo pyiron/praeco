@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeAlias, overload
 from urllib.parse import urlsplit
 
 from praeco.exceptions import ValidationError
@@ -17,6 +17,16 @@ from praeco.services.dataportal.models import (
 if TYPE_CHECKING:
     from praeco.services.dataportal.client import DataportalClient
 
+UploadPath: TypeAlias = str | Path
+# A str is itself a Sequence[str], so the overload for several paths names
+# lists and tuples instead of Sequence: an argument typed `str | list[str]`
+# then resolves to the union return type, not to a list. Other sequences are
+# accepted too and resolve to the union.
+UploadPathList: TypeAlias = (
+    list[UploadPath] | list[str] | list[Path] | tuple[UploadPath, ...]
+)
+UploadPaths: TypeAlias = UploadPath | Sequence[UploadPath]
+
 
 @dataclass
 class AssetsResource:
@@ -24,39 +34,136 @@ class AssetsResource:
 
     client: DataportalClient
 
+    @overload
     def upload(
         self,
         dataset: str | DataportalDatasetInfo,
-        path: str | Path,
+        path: UploadPath,
         *,
         name: str | None = None,
         description: str | None = None,
         format: str | None = None,
         content_type: str | None = None,
+    ) -> DataportalAssetInfo: ...
+
+    @overload
+    def upload(
+        self,
+        dataset: str | DataportalDatasetInfo,
+        path: UploadPathList,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+        format: str | None = None,
+        content_type: str | None = None,
+    ) -> list[DataportalAssetInfo]: ...
+
+    @overload
+    def upload(
+        self,
+        dataset: str | DataportalDatasetInfo,
+        path: UploadPaths,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+        format: str | None = None,
+        content_type: str | None = None,
+    ) -> DataportalAssetInfo | list[DataportalAssetInfo]: ...
+
+    def upload(
+        self,
+        dataset: str | DataportalDatasetInfo,
+        path: UploadPaths,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+        format: str | None = None,
+        content_type: str | None = None,
+    ) -> DataportalAssetInfo | list[DataportalAssetInfo]:
+        """Upload one or more local files as Dataportal assets.
+
+        Every path is checked to be a file before the first request, so a
+        wrong path anywhere in a sequence uploads nothing. The files are then
+        uploaded one at a time in the given order. If an upload fails, the
+        assets uploaded before it remain and the error propagates.
+
+        Parameters
+        ----------
+        dataset
+            Dataset id, name, or model.
+        path
+            One file path, or a sequence of file paths.
+        name
+            Asset name, for a single file only. Defaults to the file name.
+        description
+            Asset description, for a single file only.
+        format
+            Asset format, applied to every file.
+        content_type
+            MIME type sent with every file and stored as its ``mimetype``.
+
+        Returns
+        -------
+        asset
+            The uploaded asset for a single path, or a list of assets in the
+            given order for a sequence of paths.
+
+        Raises
+        ------
+        ValidationError
+            If a path is not a file, an option is blank, or `name` or
+            `description` is given for other than exactly one file.
+        """
+        upload_paths = _upload_paths(path)
+        if len(upload_paths) != 1:
+            for option, value in (("name", name), ("description", description)):
+                if value is not None:
+                    raise ValidationError(
+                        f"{option} is only supported for single-file uploads"
+                    )
+        for upload_path in upload_paths:
+            if not upload_path.is_file():
+                raise ValidationError(f"upload path must be a file: {upload_path}")
+
+        options: dict[str, Any] = {}
+        _add_if_present(options, "description", description)
+        _add_if_present(options, "format", format)
+        if content_type is not None:
+            options["mimetype"] = _required_string(content_type, "content_type")
+        asset_name = _required_string(name, "name") if name is not None else None
+        if not upload_paths:
+            return []
+
+        package_id = _dataset_id(dataset)
+        assets = [
+            self._upload_one(package_id, upload_path, name=asset_name, options=options)
+            for upload_path in upload_paths
+        ]
+        if isinstance(path, (str, Path)):
+            return assets[0]
+        return assets
+
+    def _upload_one(
+        self,
+        package_id: str,
+        path: Path,
+        *,
+        name: str | None,
+        options: Mapping[str, Any],
     ) -> DataportalAssetInfo:
-        """Upload a local file as a Dataportal asset."""
-        upload_path = Path(path)
-        if not upload_path.is_file():
-            raise ValidationError(f"upload path must be a file: {upload_path}")
-
-        filename = _required_string(upload_path.name, "upload filename")
-        normalized_content_type = (
-            _required_string(content_type, "content_type")
-            if content_type is not None
-            else None
-        )
         payload: dict[str, Any] = {
-            "package_id": _dataset_id(dataset),
-            "name": _required_string(name, "name") if name is not None else filename,
+            "package_id": package_id,
+            "name": (
+                name
+                if name is not None
+                else _required_string(path.name, "upload filename")
+            ),
+            **options,
         }
-        _add_if_present(payload, "description", description)
-        _add_if_present(payload, "format", format)
-        _add_if_present(payload, "mimetype", normalized_content_type)
-
         resource = self.client.resources.create(
             payload,
-            upload=upload_path,
-            content_type=normalized_content_type,
+            upload=path,
+            content_type=options.get("mimetype"),
         )
         return DataportalAssetInfo.from_ckan(resource)
 
@@ -79,17 +186,57 @@ class AssetsResource:
         _add_if_present(payload, "format", format)
         return DataportalAssetInfo.from_ckan(self.client.resources.create(payload))
 
+    @overload
     def upload_rdf(
         self,
         dataset: str | DataportalDatasetInfo,
-        path: str | Path,
+        path: UploadPath,
         *,
         name: str | None = None,
         description: str | None = None,
         format: str = "ttl",
         content_type: str = "text/turtle",
-    ) -> DataportalAssetInfo:
-        """Upload an RDF file with conservative Turtle defaults."""
+    ) -> DataportalAssetInfo: ...
+
+    @overload
+    def upload_rdf(
+        self,
+        dataset: str | DataportalDatasetInfo,
+        path: UploadPathList,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+        format: str = "ttl",
+        content_type: str = "text/turtle",
+    ) -> list[DataportalAssetInfo]: ...
+
+    @overload
+    def upload_rdf(
+        self,
+        dataset: str | DataportalDatasetInfo,
+        path: UploadPaths,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+        format: str = "ttl",
+        content_type: str = "text/turtle",
+    ) -> DataportalAssetInfo | list[DataportalAssetInfo]: ...
+
+    def upload_rdf(
+        self,
+        dataset: str | DataportalDatasetInfo,
+        path: UploadPaths,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+        format: str = "ttl",
+        content_type: str = "text/turtle",
+    ) -> DataportalAssetInfo | list[DataportalAssetInfo]:
+        """Upload one or more RDF files with conservative Turtle defaults.
+
+        Accepts the same paths and follows the same rules as `upload`;
+        `format` and `content_type` apply to every file.
+        """
         return self.upload(
             dataset,
             path,
@@ -155,6 +302,12 @@ class AssetsResource:
             directory=directory,
             overwrite=overwrite,
         )
+
+
+def _upload_paths(paths: UploadPaths) -> list[Path]:
+    if isinstance(paths, (str, Path)):
+        return [Path(paths)]
+    return [Path(path) for path in paths]
 
 
 def _dataset_id(dataset: str | DataportalDatasetInfo) -> str:
