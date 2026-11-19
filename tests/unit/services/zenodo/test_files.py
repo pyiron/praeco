@@ -199,6 +199,28 @@ class TestFilesResource(unittest.TestCase):
 
         self.assertEqual(session.calls, [])
 
+    def test_upload_checks_every_path_before_the_first_request(self):
+        session = FakeSession()
+        c = ZenodoClient(session=cast(Any, session))
+
+        with TemporaryDirectory() as tmp:
+            first = Path(tmp) / "one.txt"
+            _ = first.write_text("one")
+            missing = Path(tmp) / "missing.txt"
+
+            for paths in ([first, missing], [first, Path(tmp)], missing):
+                with (
+                    self.subTest(paths=paths),
+                    self.assertRaisesRegex(
+                        ValidationError, "upload path must be a file"
+                    ),
+                ):
+                    c.files.upload(42, paths)
+
+        self.assertEqual(
+            session.calls, [], msg="neither the deposition nor any file is requested"
+        )
+
     def test_rename_uses_file_endpoint(self):
         session = FakeSession(
             [FakeResponse(json_value={"id": "file-1", "filename": "renamed.txt"})]
