@@ -56,7 +56,10 @@ class DatasetsResource:
         is never public. Nothing is published beyond what `metadata` says.
 
         All arguments are checked before the first request. A failing
-        dataset creation propagates unchanged, since nothing was created.
+        dataset creation propagates unchanged and without cleanup, also with
+        `cleanup_on_error`, because praeco has no dataset to delete. CKAN may
+        still have created the dataset, for example if only the response was
+        lost, so check for the submitted name before retrying.
         An error after that raises `DatasetUploadError`, which carries the
         dataset as created and the assets uploaded so far. By default the
         incomplete dataset is kept for inspection or for uploading the
