@@ -440,7 +440,7 @@ class TestMultiFileUpload(unittest.TestCase):
                         ValidationError, re.escape(f"upload path must be a file: {bad}")
                     ),
                 ):
-                    client.assets.upload("pkg-1", [*paths, bad])
+                    client.assets.upload("pkg-1", [paths[0], bad, paths[1]])
 
         self.assertEqual(resources.calls, [])
 
