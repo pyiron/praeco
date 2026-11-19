@@ -121,9 +121,7 @@ class AssetsResource:
                     raise ValidationError(
                         f"{option} is only supported for single-file uploads"
                     )
-        for upload_path in upload_paths:
-            if not upload_path.is_file():
-                raise ValidationError(f"upload path must be a file: {upload_path}")
+        _check_files(upload_paths)
 
         options: dict[str, Any] = {}
         _add_if_present(options, "description", description)
@@ -308,6 +306,12 @@ def _upload_paths(paths: UploadPaths) -> list[Path]:
     if isinstance(paths, (str, Path)):
         return [Path(paths)]
     return [Path(path) for path in paths]
+
+
+def _check_files(paths: Sequence[Path]) -> None:
+    for path in paths:
+        if not path.is_file():
+            raise ValidationError(f"upload path must be a file: {path}")
 
 
 def _dataset_id(dataset: str | DataportalDatasetInfo) -> str:

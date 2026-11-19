@@ -72,6 +72,14 @@ class DataportalDatasetInfo:
 
 
 @dataclass(frozen=True)
+class DatasetWithAssets:
+    """A dataset created by `create_with_assets` and its uploaded assets."""
+
+    dataset: DataportalDatasetInfo
+    assets: list[DataportalAssetInfo]
+
+
+@dataclass(frozen=True)
 class DataportalDatasetSearchResult:
     """Dataportal dataset search result."""
 
