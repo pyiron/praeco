@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Sequence
 from pathlib import Path
 from typing import TypeAlias, TypeVar
 
 from praeco.exceptions import ValidationError
 
-UploadPath: TypeAlias = str | Path
+# Any path-like object counts as one path, as Path() accepts it.
+UploadPath: TypeAlias = str | os.PathLike[str]
 # A str is itself a Sequence[str], so the overload for several paths names
 # lists and tuples instead of Sequence: an argument typed `str | list[str]`
 # then resolves to the union return type, not to a list. The type variable
@@ -21,7 +23,7 @@ UploadPaths: TypeAlias = UploadPath | Sequence[UploadPath]
 
 def normalize_upload_paths(paths: UploadPaths) -> list[Path]:
     """Return one path or a sequence of paths as a list of `Path` objects."""
-    if isinstance(paths, (str, Path)):
+    if isinstance(paths, (str, os.PathLike)):
         return [Path(paths)]
     return [Path(path) for path in paths]
 

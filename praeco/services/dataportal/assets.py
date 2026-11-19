@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -142,7 +143,7 @@ class AssetsResource:
             self._upload_one(package_id, upload_path, name=asset_name, options=options)
             for upload_path, asset_name in zip(upload_paths, asset_names, strict=True)
         ]
-        if isinstance(path, (str, Path)):
+        if isinstance(path, (str, os.PathLike)):
             return assets[0]
         return assets
 
