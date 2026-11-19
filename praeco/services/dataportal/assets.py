@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,7 +18,8 @@ from praeco.services.dataportal.models import (
 if TYPE_CHECKING:
     from praeco.services.dataportal.client import DataportalClient
 
-UploadPath: TypeAlias = str | Path
+# Any path-like object counts as one path, as Path() accepts it.
+UploadPath: TypeAlias = str | os.PathLike[str]
 # A str is itself a Sequence[str], so the overload for several paths names
 # lists and tuples instead of Sequence: an argument typed `str | list[str]`
 # then resolves to the union return type, not to a list. The type variable
@@ -146,7 +148,7 @@ class AssetsResource:
             self._upload_one(package_id, upload_path, name=asset_name, options=options)
             for upload_path, asset_name in zip(upload_paths, asset_names, strict=True)
         ]
-        if isinstance(path, (str, Path)):
+        if isinstance(path, (str, os.PathLike)):
             return assets[0]
         return assets
 
@@ -304,7 +306,7 @@ class AssetsResource:
 
 
 def _upload_paths(paths: UploadPaths) -> list[Path]:
-    if isinstance(paths, (str, Path)):
+    if isinstance(paths, (str, os.PathLike)):
         return [Path(paths)]
     return [Path(path) for path in paths]
 

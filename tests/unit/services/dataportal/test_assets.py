@@ -2,7 +2,7 @@ import json
 import os
 import re
 import unittest
-from pathlib import Path
+from pathlib import Path, PurePath
 from tempfile import TemporaryDirectory
 from typing import Any, cast
 
@@ -385,6 +385,22 @@ class TestMultiFileUpload(unittest.TestCase):
         self.assertEqual(
             [call[1]["package_id"] for call in resources.calls], ["pkg-2", "pkg-2"]
         )
+
+    def test_path_like_objects_are_single_paths(self):
+        client, resources = client_with_stub()
+
+        with TemporaryDirectory() as directory:
+            paths = write_files(directory, "data.csv")
+            with os.scandir(directory) as entries:
+                entry = next(iter(entries))
+            for given in (PurePath(paths[0]), entry):
+                with self.subTest(type=type(given).__name__):
+                    asset = client.assets.upload("pkg-1", given)
+                    rdf_asset = client.assets.upload_rdf("pkg-1", given)
+
+                    self.assertIsInstance(asset, DataportalAssetInfo)
+                    self.assertIsInstance(rdf_asset, DataportalAssetInfo)
+                    self.assertEqual(resources.calls[-1][2]["upload"], paths[0])
 
     def test_one_element_sequence_accepts_name_and_description(self):
         client, resources = client_with_stub()
