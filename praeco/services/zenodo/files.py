@@ -46,7 +46,11 @@ class FilesResource:
         filename: str | None = None,
         content_type: str | None = None,
     ) -> UploadedFiles:
-        """Upload one or more files through the deposition bucket link."""
+        """Upload one or more files through the deposition bucket link.
+
+        Every path is checked to be a file before the first request, so a
+        wrong path anywhere in `paths` uploads nothing.
+        """
         upload_paths = _upload_paths(paths)
         single_file = len(upload_paths) == 1
         if not single_file:
@@ -64,6 +68,9 @@ class FilesResource:
             _upload_filename(path, filename=filename if single_file else None)
             for path in upload_paths
         ]
+        for path in upload_paths:
+            if not path.is_file():
+                raise ValidationError(f"upload path must be a file: {path}")
 
         deposition_info = self._ensure_deposition(deposition)
         bucket_url = deposition_info.links.bucket

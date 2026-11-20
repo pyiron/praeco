@@ -1,6 +1,8 @@
 import json
+import os
+import re
 import unittest
-from pathlib import Path
+from pathlib import Path, PurePath
 from tempfile import TemporaryDirectory
 from typing import Any, cast
 
@@ -313,6 +315,211 @@ class TestAssetsResource(unittest.TestCase):
             client.assets.show(" ")
 
         self.assertEqual(resources.calls, [])
+
+
+class FailingStubResourcesResource(StubResourcesResource):
+    """Stub whose `create` raises on the call with index `fail_at`."""
+
+    def __init__(self, fail_at: int):
+        super().__init__()
+        self.fail_at = fail_at
+
+    def create(self, payload: dict[str, Any], **kwargs: Any) -> CkanResourceInfo:
+        if len(self.calls) == self.fail_at:
+            self.calls.append(("create failed", payload, kwargs))
+            raise RuntimeError("upload failed")
+        return super().create(payload, **kwargs)
+
+
+def write_files(directory: str, *names: str) -> list[Path]:
+    paths = [Path(directory) / name for name in names]
+    for path in paths:
+        path.write_text(f"content of {path.name}\n")
+    return paths
+
+
+class TestMultiFileUpload(unittest.TestCase):
+    def test_sequence_uploads_each_file_in_order_and_returns_a_list(self):
+        client, resources = client_with_stub()
+
+        with TemporaryDirectory() as directory:
+            paths = write_files(directory, "data.csv", "README.md")
+
+            assets = client.assets.upload(
+                "pkg-1",
+                [str(paths[0]), paths[1]],
+                format="csv",
+                content_type="text/csv",
+            )
+
+        self.assertIsInstance(assets, list)
+        self.assertEqual(len(assets), 2)
+        self.assertTrue(all(isinstance(a, DataportalAssetInfo) for a in assets))
+        self.assertEqual(
+            resources.calls,
+            [
+                (
+                    "create",
+                    {
+                        "package_id": "pkg-1",
+                        "name": path.name,
+                        "format": "csv",
+                        "mimetype": "text/csv",
+                    },
+                    {"upload": path, "content_type": "text/csv"},
+                )
+                for path in paths
+            ],
+            msg="format and content_type apply to every file",
+        )
+
+    def test_tuple_and_dataset_model_are_accepted(self):
+        client, resources = client_with_stub()
+
+        with TemporaryDirectory() as directory:
+            paths = write_files(directory, "one.txt", "two.txt")
+
+            assets = client.assets.upload(dataset_model("pkg-2"), tuple(paths))
+
+        self.assertEqual(len(assets), 2)
+        self.assertEqual(
+            [call[1]["package_id"] for call in resources.calls], ["pkg-2", "pkg-2"]
+        )
+
+    def test_path_like_objects_are_single_paths(self):
+        client, resources = client_with_stub()
+
+        with TemporaryDirectory() as directory:
+            paths = write_files(directory, "data.csv")
+            with os.scandir(directory) as entries:
+                entry = next(iter(entries))
+            for given in (PurePath(paths[0]), entry):
+                with self.subTest(type=type(given).__name__):
+                    asset = client.assets.upload("pkg-1", given)
+                    rdf_asset = client.assets.upload_rdf("pkg-1", given)
+
+                    self.assertIsInstance(asset, DataportalAssetInfo)
+                    self.assertIsInstance(rdf_asset, DataportalAssetInfo)
+                    self.assertEqual(resources.calls[-1][2]["upload"], paths[0])
+
+    def test_one_element_sequence_accepts_name_and_description(self):
+        client, resources = client_with_stub()
+
+        with TemporaryDirectory() as directory:
+            paths = write_files(directory, "data.csv")
+
+            assets = client.assets.upload(
+                "pkg-1", paths, name="Raw data", description="Measurements."
+            )
+
+        self.assertIsInstance(assets, list)
+        self.assertEqual(len(assets), 1)
+        self.assertEqual(resources.calls[0][1]["name"], "Raw data")
+        self.assertEqual(resources.calls[0][1]["description"], "Measurements.")
+
+    def test_name_and_description_are_rejected_for_several_files(self):
+        client, resources = client_with_stub()
+
+        with TemporaryDirectory() as directory:
+            paths = write_files(directory, "one.txt", "two.txt")
+
+            for option in ("name", "description"):
+                for given in (paths, []):
+                    with (
+                        self.subTest(option=option, paths=len(given)),
+                        self.assertRaisesRegex(
+                            ValidationError,
+                            f"{option} is only supported for single-file uploads",
+                        ),
+                    ):
+                        client.assets.upload("pkg-1", given, **{option: "x"})
+
+        self.assertEqual(resources.calls, [])
+
+    def test_empty_sequence_returns_empty_list_without_request(self):
+        client, resources = client_with_stub()
+
+        self.assertEqual(client.assets.upload("pkg-1", []), [])
+        self.assertEqual(client.assets.upload_rdf("pkg-1", []), [])
+        self.assertEqual(resources.calls, [])
+
+    def test_every_path_is_checked_before_the_first_upload(self):
+        client, resources = client_with_stub()
+
+        with TemporaryDirectory() as directory:
+            paths = write_files(directory, "one.txt", "two.txt")
+            missing = Path(directory) / "missing.txt"
+
+            for bad in (missing, Path(directory)):
+                with (
+                    self.subTest(bad=bad.name),
+                    self.assertRaisesRegex(
+                        ValidationError, re.escape(f"upload path must be a file: {bad}")
+                    ),
+                ):
+                    client.assets.upload("pkg-1", [paths[0], bad, paths[1]])
+
+        self.assertEqual(resources.calls, [])
+
+    @unittest.skipIf(os.name == "nt", "Windows does not allow such file names")
+    def test_blank_file_name_is_rejected_before_the_first_upload(self):
+        client, resources = client_with_stub()
+
+        with TemporaryDirectory() as directory:
+            paths = write_files(directory, "one.txt", "   ")
+
+            with self.assertRaisesRegex(
+                ValidationError, "upload filename must be non-empty"
+            ):
+                client.assets.upload("pkg-1", paths)
+
+        self.assertEqual(resources.calls, [], msg="no asset is created")
+
+    def test_blank_options_are_rejected_before_the_first_upload(self):
+        client, resources = client_with_stub()
+
+        with TemporaryDirectory() as directory:
+            paths = write_files(directory, "one.txt", "two.txt")
+
+            for option in ("format", "content_type"):
+                with (
+                    self.subTest(option=option),
+                    self.assertRaisesRegex(ValidationError, option),
+                ):
+                    client.assets.upload("pkg-1", paths, **{option: " "})
+
+        self.assertEqual(resources.calls, [])
+
+    def test_failed_upload_propagates_and_keeps_earlier_assets(self):
+        client = DataportalClient(session=cast(Any, FakeSession()))
+        resources = FailingStubResourcesResource(fail_at=1)
+        client.resources = cast(Any, resources)
+
+        with TemporaryDirectory() as directory:
+            paths = write_files(directory, "one.txt", "two.txt", "three.txt")
+
+            with self.assertRaisesRegex(RuntimeError, "upload failed"):
+                client.assets.upload("pkg-1", paths)
+
+        self.assertEqual(
+            [(call[0], call[2]["upload"]) for call in resources.calls],
+            [("create", paths[0]), ("create failed", paths[1])],
+            msg="the first asset stays, the third file is never sent",
+        )
+
+    def test_upload_rdf_applies_turtle_defaults_to_every_file(self):
+        client, resources = client_with_stub()
+
+        with TemporaryDirectory() as directory:
+            paths = write_files(directory, "s355.ttl", "s235.ttl")
+
+            assets = client.assets.upload_rdf("pkg-1", paths)
+
+        self.assertEqual(len(assets), 2)
+        self.assertEqual(
+            [(call[1]["format"], call[2]["content_type"]) for call in resources.calls],
+            [("ttl", "text/turtle"), ("ttl", "text/turtle")],
+        )
 
 
 def dataset_model(dataset_id: str) -> DataportalDatasetInfo:

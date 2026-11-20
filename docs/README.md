@@ -252,6 +252,15 @@ asset = client.assets.upload_rdf(
 )
 ```
 
+`client.assets.upload()` and `client.assets.upload_rdf()` also accept a list or tuple of paths and then return a list of assets in the same order:
+
+```python
+assets = client.assets.upload(dataset, ["data.csv", "README.md"])
+rdf_assets = client.assets.upload_rdf(dataset, ["s355.ttl", "s235.ttl"], format="turtle")
+```
+
+Every path is checked to be a file before the first request, so a wrong path anywhere in the list uploads nothing; `ValidationError` names it. The files are then uploaded one at a time. If an upload fails, the assets uploaded before it remain and the error propagates. `format` and `content_type` apply to every file. `name` and `description` describe a single asset and raise `ValidationError` unless exactly one path is given; set them on several assets afterwards with `client.assets.patch()`. An empty list uploads nothing and returns an empty list. Type checkers see `DataportalAssetInfo` for a single path and `list[DataportalAssetInfo]` for a list or tuple; an argument whose type allows both, such as `str | list[str]`, gives the union of the two.
+
 The Dataportal performs triplestore updates asynchronously. Once Fuseki indexing has completed and the generated SPARQL resource is available, query it through the dataset model:
 
 ```python
@@ -399,6 +408,8 @@ draft = client.depositions.create(prereserve_doi=True)
 uploaded = client.files.upload(draft, artifact)
 draft = client.depositions.set_metadata(draft, metadata)
 ```
+
+`client.files.upload()` takes one path or a sequence of paths and always returns a list. Every path is checked to be a file before the first request; a wrong path raises `ValidationError` and uploads nothing.
 
 Publishing is an explicit action:
 
