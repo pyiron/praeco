@@ -3,13 +3,21 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypeAlias, TypeVar, overload
+from typing import TYPE_CHECKING, Any, overload
 from urllib.parse import urlsplit
 
 from praeco.exceptions import ValidationError
+from praeco.services.dataportal._uploads import (
+    UploadPath,
+    UploadPaths,
+    UploadPathT,
+    check_upload_files,
+    default_asset_name,
+    normalize_upload_paths,
+)
 from praeco.services.dataportal.models import (
     DataportalAssetInfo,
     DataportalDatasetInfo,
@@ -17,17 +25,6 @@ from praeco.services.dataportal.models import (
 
 if TYPE_CHECKING:
     from praeco.services.dataportal.client import DataportalClient
-
-# Any path-like object counts as one path, as Path() accepts it.
-UploadPath: TypeAlias = str | os.PathLike[str]
-# A str is itself a Sequence[str], so the overload for several paths names
-# lists and tuples instead of Sequence: an argument typed `str | list[str]`
-# then resolves to the union return type, not to a list. The type variable
-# lets lists of subtypes, such as list[PosixPath], select the list overload
-# despite list's invariance. Other sequences are accepted too and resolve to
-# the union.
-_P = TypeVar("_P", bound=UploadPath)
-UploadPaths: TypeAlias = UploadPath | Sequence[UploadPath]
 
 
 @dataclass
@@ -52,7 +49,7 @@ class AssetsResource:
     def upload(
         self,
         dataset: str | DataportalDatasetInfo,
-        path: list[_P] | tuple[_P, ...],
+        path: list[UploadPathT] | tuple[UploadPathT, ...],
         *,
         name: str | None = None,
         description: str | None = None,
@@ -116,16 +113,14 @@ class AssetsResource:
             If a path is not a file, an option is blank, or `name` or
             `description` is given for other than exactly one file.
         """
-        upload_paths = _upload_paths(path)
+        upload_paths = normalize_upload_paths(path)
         if len(upload_paths) != 1:
             for option, value in (("name", name), ("description", description)):
                 if value is not None:
                     raise ValidationError(
                         f"{option} is only supported for single-file uploads"
                     )
-        for upload_path in upload_paths:
-            if not upload_path.is_file():
-                raise ValidationError(f"upload path must be a file: {upload_path}")
+        check_upload_files(upload_paths)
 
         options: dict[str, Any] = {}
         _add_if_present(options, "description", description)
@@ -136,7 +131,7 @@ class AssetsResource:
             (
                 _required_string(name, "name")
                 if name is not None
-                else _required_string(upload_path.name, "upload filename")
+                else default_asset_name(upload_path)
             )
             for upload_path in upload_paths
         ]
@@ -203,7 +198,7 @@ class AssetsResource:
     def upload_rdf(
         self,
         dataset: str | DataportalDatasetInfo,
-        path: list[_P] | tuple[_P, ...],
+        path: list[UploadPathT] | tuple[UploadPathT, ...],
         *,
         name: str | None = None,
         description: str | None = None,
@@ -303,12 +298,6 @@ class AssetsResource:
             directory=directory,
             overwrite=overwrite,
         )
-
-
-def _upload_paths(paths: UploadPaths) -> list[Path]:
-    if isinstance(paths, (str, os.PathLike)):
-        return [Path(paths)]
-    return [Path(path) for path in paths]
 
 
 def _dataset_id(dataset: str | DataportalDatasetInfo) -> str:
